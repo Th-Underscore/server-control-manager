@@ -8,22 +8,20 @@ A simple web-based control panel built with Flask to manage and monitor server p
 *   **Process Management:** Finds server folders containing a specified batch file (`starter.bat` by default) within a base directory.
 *   **Real-time Output:** Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
 *   **Authentication:** Secure login system using Flask-Login to protect access.
-*   **Rate Limiting:** Basic protection against brute-force login attempts.
+*   **Rate Limiting:** Basic protection against brute-force login attempts (defaults to 200 per day, 50 per hour).
+*   **Command Sending:** Send commands directly to the stdin of running server processes (requires a command password).
 *   **Backup Copy:** Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
 *   **SSL Support:** Optional SSL/TLS encryption for secure connections (requires certificate and key files).
-*   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py`.
+*   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
 ## Requirements
 
 *   Python 3.x
-*   Flask
-*   Flask-Login
-*   Flask-Limiter
-*   Werkzeug (usually installed with Flask)
+*   `requirements.txt`
 
 You can install the required Python packages using pip:
 ```bash
-pip install Flask Flask-Login Flask-Limiter Werkzeug
+pip install Flask Flask-Login Flask-Limiter Werkzeug dotenv
 ```
 or
 ```bash
@@ -39,10 +37,14 @@ Before running the application, you **must** configure the following variables a
     SERVERS_BASE_DIR = r"C:\\path\\to\\your\\servers" # Example for Windows
     # SERVERS_BASE_DIR = "/path/to/your/servers" # Example for Linux/macOS
     ```
-2.  **`PASSWORD`**: **Change the default password** for the `admin` user for security.
-    ```python
-    PASSWORD = "your_strong_password_here"
-    ```
+2.  **`PASSWORD` / `CMD_PASSWORD`**:
+    *   These can be set directly in `app.py` as fallback values.
+    *   **Recommended**: Create a `.env` file in the same directory as `app.py` and define them there for better security and easier management:
+        ```env
+        PASSWORD="your_strong_admin_password"
+        CMD_PASSWORD="your_strong_command_password"
+        ```
+    *   If `.env` is used, the values in `app.py` will be overridden. **Change the default passwords!**
 3.  **`SECRET_KEY`**: For production or persistent sessions, set the `FLASK_SECRET_KEY` environment variable or replace the `secrets.token_hex(24)` call with a fixed, strong, secret string.
     ```python
     # Recommended: Set environment variable FLASK_SECRET_KEY
@@ -53,9 +55,10 @@ Before running the application, you **must** configure the following variables a
 **Optional Configuration:**
 
 *   **`BATCH_FILE_NAME`**: Change if your server startup scripts have a different name (default: `starter.bat`).
+*   **`BACKUPS_DIR`**: Name of the shared directory where backups from individual servers are copied (default: `Backups`). This directory is created within `SERVERS_BASE_DIR`.
 *   **`HOST` / `PORT`**: Modify the network interface and port the web server listens on.
 *   **`USERNAME`**: Change the default admin username if desired.
-*   **`SSL_CERT_PATH` / `SSL_KEY_PATH`**: Provide paths to your SSL certificate and key files to enable HTTPS. If these files exist, uncomment the `ssl_context=ssl_context` part in the `app.run` call at the bottom.
+*   **`SSL_CERT_PATH` / `SSL_KEY_PATH`**: Provide paths to your SSL certificate and key files to enable HTTPS. If these files exist, ensure the `app.run` call at the bottom of `app.py` is the one that includes `ssl_context=ssl_context` (and the other is commented out).
 
 ## Server Folder Structure
 
@@ -87,7 +90,7 @@ SERVERS_BASE_DIR/
 1.  Ensure you have configured `app.py` as described above.
 2.  Open a terminal or command prompt.
 3.  Navigate to the directory containing `app.py`.
-4.  Run the script using Python:
+4.  Run the script using Python (this can also be done through its own batch file):
     ```bash
     python app.py
     ```
@@ -101,7 +104,8 @@ SERVERS_BASE_DIR/
 4.  **Start:** Click the "Start" button next to a server to execute its batch file. The status will change to "Running", and the output console will appear.
 5.  **Stop:** Click the "Stop" button to terminate the server process. If a `backups` folder exists with subfolders, the latest backup will be copied. The status will change to "Stopped" or "Finished".
 6.  **View Output:** The output area below each server shows the real-time console output while it's running and persists after it stops.
-7.  **Logout:** Click the "Logout" link in the top navigation bar.
+7.  **Send Command:** For a running server, type your command into the "Enter command..." field, enter the "Cmd Password", and click "Send". The command will be sent to the server's input.
+8.  **Logout:** Click the "Logout" link in the top navigation bar.
 
 ## Security Notes
 

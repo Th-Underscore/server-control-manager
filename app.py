@@ -4,6 +4,7 @@ import threading
 import time
 import shutil
 import secrets
+from dotenv import load_dotenv
 from flask import Flask, render_template_string, request, Response, jsonify, stream_with_context, redirect, url_for, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
@@ -11,19 +12,22 @@ from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Configuration ---
-SERVERS_BASE_DIR = r"C:\\path\\to\\servers"   # !!! IMPORTANT: SET THIS PATH !!!
-BATCH_FILE_NAME = "starter.bat"               # Name of the batch file in each server folder
-BACKUPS_DIR = "Backups"                       # Name of the backup directory (relative to SERVERS_BASE_DIR)
-HOST = "0.0.0.0"                              # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
-PORT = 25564                                  # Port for the web server
-USERNAME = "admin"                            # Username for login
-PASSWORD = "password"                         # !!! CHANGE THIS PASSWORD !!!
+load_dotenv()  # Load from .env file if present
+
+SERVERS_BASE_DIR = r"C:\\path\\to\\servers"              # !!! IMPORTANT: SET THIS PATH !!!
+BATCH_FILE_NAME = "starter.bat"                          # Name of the batch file in each server folder
+BACKUPS_DIR = "Backups"                                  # Name of the backup directory (relative to SERVERS_BASE_DIR)
+HOST = "0.0.0.0"                                         # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
+PORT = 25564                                             # Port for the web server
+USERNAME = "admin"                                       # Global username for login
+PASSWORD = os.getenv("PASSWORD", "password")             # !!! CHANGE THIS PASSWORD !!!
+COMMAND_PASSWORD = os.getenv("CMD_PASSWORD", "cmdpass")  # !!! CHANGE THIS COMMAND PASSWORD !!!
 # Generate a strong secret key. Keep this key secret and consistent across restarts.
 # For production, set this via environment variable or config file.
 SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
 # SSL Certificate (Optional - uncomment app.run line below to enable)
-SSL_CERT_PATH = "%userprofile%\\cert.pem"  # "%userprofile%\\server.crt"
-SSL_KEY_PATH = "%userprofile%\\key.pem"  # "%userprofile%\\server.key"
+SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
+SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"    # "C:\\Users\\Me\\server.key"
 # ---------------------
 
 app = Flask(__name__)
@@ -65,6 +69,9 @@ class User(UserMixin):
 users_storage = {
     USERNAME: generate_password_hash(PASSWORD)
 }
+# Store command password hash
+COMMAND_PASSWORD_HASH = generate_password_hash(COMMAND_PASSWORD)
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -140,57 +147,100 @@ def read_process_output(server_name, process):
                      # Keep the entry but mark process as None to indicate it finished
                      running_processes[server_name]['process'] = None
 
+# --- Backup Helper ---
+def _log_to_server_output(server_name, message):
+    """Helper to log messages to a specific server's output stream, displayed in the UI."""
+    # NOTE: This is an internal helper.
+    global running_processes
+    if server_name in running_processes:
+        process_info = running_processes[server_name]
+        with process_info.get('lock', threading.Lock()): # Use existing lock or a temp one if somehow missing
+            if 'output' in process_info:
+                 process_info['output'].append(message)
+            else:
+                print(f"Warning: 'output' list not found for server {server_name} during backup logging.")
+    else:
+        print(f"Warning: Process info for server {server_name} not found during backup logging.")
+
+
 def find_latest_backup_folder(backup_dir):
-    """Finds the latest folder in the backup directory based on name sorting."""
+    """Finds the latest file or folder in the backup directory based on name sorting."""
     if not os.path.isdir(backup_dir):
         return None
     try:
-        folders = [d for d in os.listdir(backup_dir) if os.path.isdir(os.path.join(backup_dir, d))]
-        if not folders:
+        items = os.listdir(backup_dir)
+        if not items:
             return None
-        # Sort folders alphabetically/numerically - assumes naming convention allows this
+        # Sort items alphabetically/numerically - assumes naming convention allows this
         # For timestamp-based sorting, you might use:
-        # folders.sort(key=lambda d: os.path.getmtime(os.path.join(backup_dir, d)))
-        folders.sort()
-        return folders[-1] # Return the last one after sorting
+        # items.sort(key=lambda item: os.path.getmtime(os.path.join(backup_dir, item)))
+        items.sort()
+        return items[-1]
     except OSError as e:
-        print(f"Error listing backup folders in {backup_dir}: {e}")
+        print(f"Error listing backup items in {backup_dir}: {e}")
         return None
 
 def copy_latest_backup(server_name, server_path):
-    """Copies the latest backup folder to the shared Backups directory."""
+    """Copies the latest backup file or folder to the shared Backups directory."""
+    _log_to_server_output(server_name, "--- BACKUP START ---")
     source_backups_dir = os.path.join(server_path, 'backups')
     # SERVERS_BASE_DIR/BACKUPS_DIR
     target_parent_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, BACKUPS_DIR))
 
-    print(f"Checking for backups in: {source_backups_dir}")
-    latest_folder_name = find_latest_backup_folder(source_backups_dir)
+    log_msg_checking = f"Checking for backups in: {source_backups_dir}"
+    print(log_msg_checking)
+    _log_to_server_output(server_name, log_msg_checking)
+    latest_item_name = find_latest_backup_folder(source_backups_dir)
 
-    if latest_folder_name:
-        print(f"Found latest backup folder: {latest_folder_name}")
-        source_path = os.path.join(source_backups_dir, latest_folder_name)
-        dest_folder_name = f"{server_name}_{latest_folder_name}"
-        dest_path = os.path.join(target_parent_dir, dest_folder_name)
-        print(f"Attempting to copy backup from '{source_path}' to '{dest_path}'")
+    if latest_item_name:
+        log_msg_found = f"Found latest backup item: {latest_item_name}"
+        print(log_msg_found)
+        _log_to_server_output(server_name, log_msg_found)
+        source_path = os.path.join(source_backups_dir, latest_item_name)
+        is_source_dir = os.path.isdir(source_path)
+        dest_item_name = f"{server_name}_{latest_item_name}"
+        dest_path = os.path.join(target_parent_dir, dest_item_name)
+        log_msg_attempting = f"Attempting to copy backup from '{source_path}' to '{dest_path}'"
+        print(log_msg_attempting)
+        _log_to_server_output(server_name, log_msg_attempting)
 
         try:
             os.makedirs(target_parent_dir, exist_ok=True)
 
             if os.path.exists(dest_path):
-                print(f"Warning: Destination backup folder '{dest_path}' already exists. Skipping copy.")
-                return f"Backup skipped (destination exists: {dest_folder_name})"
+                skip_message = f"Destination backup item '{dest_item_name}' already exists. Skipping copy."
+                print(f"Warning: {skip_message}")
+                _log_to_server_output(server_name, skip_message)
+                _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+                return f"Backup skipped (destination exists: {dest_item_name})"
 
-            shutil.copytree(source_path, dest_path)
-            print(f"Successfully copied backup to '{dest_path}'")
-            return f"Backup copied ({dest_folder_name})"
+            if is_source_dir:
+                shutil.copytree(source_path, dest_path)
+            else:
+                shutil.copy2(source_path, dest_path) # copy2 preserves metadata
+
+            success_message = f"Successfully copied backup '{dest_item_name}' to shared Backups."
+            print(success_message)
+            _log_to_server_output(server_name, success_message)
+            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+            return f"Backup copied ({dest_item_name})"
         except OSError as e:
-            print(f"Error copying backup for {server_name}: {e}")
+            error_message = f"Error copying backup for {server_name}: {e}"
+            print(error_message)
+            _log_to_server_output(server_name, error_message)
+            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
             return f"Backup failed (Error: {e})"
         except Exception as e:
-            print(f"Unexpected error during backup copy for {server_name}: {e}")
+            error_message = f"Unexpected error during backup copy for {server_name}: {e}"
+            print(error_message)
+            _log_to_server_output(server_name, error_message)
+            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
             return f"Backup failed (Unexpected Error: {e})"
     else:
-        print(f"No backup folders found or accessible in {source_backups_dir}")
+        not_found_message = f"No backup items found or accessible in {source_backups_dir}"
+        print(not_found_message)
+        _log_to_server_output(server_name, not_found_message)
+        _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
         return "No backups found to copy"
 
 # --- Routes ---
@@ -293,6 +343,7 @@ def start_server(server_name):
     try:
         process = subprocess.Popen(
             [batch_path],
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=server_path,
@@ -302,7 +353,7 @@ def start_server(server_name):
 
         # Store process info and start output reading thread
         # Create the lock *before* adding the entry to avoid race conditions
-        new_lock = threading.Lock()
+        new_lock = threading.RLock()
         running_processes[server_name] = {
             'process': process,
             'output': [f"--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
@@ -447,6 +498,53 @@ def stream_output(server_name):
 
     return Response(stream_with_context(generate_output()), mimetype='text/event-stream')
 
+@app.route('/command/<server_name>', methods=['POST'])
+@login_required
+def send_command(server_name):
+    """Sends a command to the stdin of a running server process."""
+    global running_processes
+    global COMMAND_PASSWORD_HASH
+
+    if not request.is_json:
+        return jsonify({"status": "error", "message": "Invalid request format, JSON expected."}), 400
+
+    data = request.get_json()
+    command_text = data.get('command')
+    provided_cmd_password = data.get('command_password')
+
+    if not command_text or not provided_cmd_password:
+        return jsonify({"status": "error", "message": "Missing command or command password."}), 400
+
+    # Verify the command password
+    if not check_password_hash(COMMAND_PASSWORD_HASH, provided_cmd_password):
+        return jsonify({"status": "error", "message": "Invalid command password."}), 403
+
+    process_info = running_processes.get(server_name)
+    if not process_info or not process_info.get('process') or process_info['process'].poll() is not None:
+        return jsonify({"status": "error", "message": f"{server_name} is not running or already stopped."}), 404
+
+    process = process_info['process']
+
+    try:
+        # Ensure command ends with a newline, as most console apps expect this
+        if not command_text.endswith('\n'):
+            command_text += '\n'
+
+        process.stdin.write(command_text.encode('utf-8'))
+        process.stdin.flush() # Ensure it's sent immediately
+
+        # Log the command to the server's output display as well
+        with process_info['lock']:
+            process_info['output'].append(f">>> CMD: {command_text.strip()}")
+
+        return jsonify({"status": "success", "message": "Command sent."})
+    except Exception as e:
+        print(f"Error sending command to {server_name}: {e}")
+        # Also log this error to the server's output display
+        with process_info['lock']:
+            process_info['output'].append(f"--- ERROR SENDING COMMAND: {e} ---")
+        return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
+
 
 # --- HTML Templates ---
 
@@ -474,13 +572,19 @@ HTML_TEMPLATE = """
         .server-item { background: #e9e9e9; margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
         .server-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .server-name { font-weight: bold; flex-grow: 1; min-width: 100px; }
-        button { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: background-color 0.2s ease; }
+        button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+        button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
+        input[type="text"], input[type="password"] { border: 1px solid #ccc; }
         .start-button { background-color: #28a745; color: white; }
         .start-button:hover:not(:disabled) { background-color: #218838; }
         .stop-button { background-color: #dc3545; color: white; }
         .stop-button:hover:not(:disabled) { background-color: #c82333; }
+        .command-button { background-color: #007bff; color: white; }
+        .command-button:hover:not(:disabled) { background-color: #0056b3; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .status { font-style: italic; color: #666; font-size: 0.9em; min-width: 80px; text-align: right; }
+        .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
         .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
@@ -515,9 +619,14 @@ HTML_TEMPLATE = """
                         <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
                         <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
                     </div>
+                    <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
+                        <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
+                        <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
+                        <button class="command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Send</button>
+                    </div>
                     <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
                         <div class="output-title">Output for {{ server }}:</div>
-                        </div>
+                    </div>
                 </li>
                 {% endfor %}
             {% else %}
@@ -538,10 +647,19 @@ HTML_TEMPLATE = """
                 const stopButton = item.querySelector('.stop-button');
                 const statusSpan = item.querySelector('.status');
                 const outputArea = item.querySelector('.output-area');
+                const commandSection = item.querySelector('.command-section');
+                const commandInput = item.querySelector('.command-input');
+                const commandPasswordInput = item.querySelector('.command-password-input');
+                const commandButton = item.querySelector('.command-button');
+
 
                 // --- Event Handlers ---
                 startButton.addEventListener('click', () => handleStart(serverName));
                 stopButton.addEventListener('click', () => handleStop(serverName));
+                if (commandButton) { // Ensure command button exists
+                    commandButton.addEventListener('click', () => handleSendCommand(serverName));
+                }
+
 
                 // --- Initial State ---
                 if (statusSpan.textContent === 'Running') {
@@ -596,7 +714,6 @@ HTML_TEMPLATE = """
                         } else {
                             console.error(`Error stopping ${serverName}:`, data.message);
                             alert(`Error stopping ${serverName}: ${data.message}`);
-                            // Revert UI to previous state if stop failed server-side
                             const statusSpan = document.getElementById(`status-${serverName}`);
                             updateUI(serverName, statusSpan.textContent.toLowerCase() === 'running' ? 'running' : 'stopped', 'Error Stopping');
                         }
@@ -607,6 +724,64 @@ HTML_TEMPLATE = """
                         const statusSpan = document.getElementById(`status-${serverName}`);
                         updateUI(serverName, statusSpan.textContent.toLowerCase() === 'running' ? 'running' : 'stopped', 'Error Stopping');
                     });
+            }
+
+            function handleSendCommand(serverName) {
+                const item = document.getElementById(`server-${serverName}`);
+                const commandInput = item.querySelector('.command-input');
+                const commandPasswordInput = item.querySelector('.command-password-input');
+                const commandButton = item.querySelector('.command-button');
+
+                const commandText = commandInput.value.trim();
+                const commandPassword = commandPasswordInput.value;
+
+                if (!commandText) {
+                    alert('Please enter a command.');
+                    commandInput.focus();
+                    return;
+                }
+                if (!commandPassword) {
+                    alert('Please enter the command password.');
+                    commandPasswordInput.focus();
+                    return;
+                }
+
+                console.log(`Sending command to ${serverName}: ${commandText}`);
+                commandButton.disabled = true; // Disable button during request
+
+                fetch(`/command/${serverName}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        command: commandText,
+                        command_password: commandPassword
+                    })
+                })
+                .then(response => response.json()) // Assume server always returns JSON
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log(`Command sent to ${serverName} successfully.`);
+                        commandInput.value = ''; // Clear command input on success
+                        // Optionally clear password or keep it based on preference
+                        // commandPasswordInput.value = '';
+                    } else {
+                        console.error(`Error sending command to ${serverName}:`, data.message);
+                        alert(`Error sending command: ${data.message}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error during command fetch:', error);
+                    alert(`Error sending command: ${error.toString()}`);
+                })
+                .finally(() => {
+                    // Re-enable button only if server is still running
+                    const statusSpan = document.getElementById(`status-${serverName}`);
+                    if (statusSpan && (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Starting...')) {
+                         commandButton.disabled = false;
+                    }
+                });
             }
 
             // --- Server-Sent Events (SSE) ---
@@ -672,6 +847,11 @@ HTML_TEMPLATE = """
                 const stopButton = item.querySelector('.stop-button');
                 const statusSpan = item.querySelector('.status');
                 const outputArea = item.querySelector('.output-area');
+                const commandSection = item.querySelector('.command-section');
+                const commandButton = item.querySelector('.command-button');
+                const commandInput = item.querySelector('.command-input');
+                const commandPasswordInput = item.querySelector('.command-password-input');
+
 
                 statusSpan.textContent = statusText;
 
@@ -680,16 +860,32 @@ HTML_TEMPLATE = """
                         startButton.disabled = true;
                         stopButton.disabled = false;
                         outputArea.style.display = 'block';
+                        if(commandSection) commandSection.style.display = 'flex';
+                        if(commandButton) commandButton.disabled = false;
+                        if(commandInput) commandInput.disabled = false;
+                        if(commandPasswordInput) commandPasswordInput.disabled = false;
                         break;
                     case 'stopped':
                         startButton.disabled = false;
                         stopButton.disabled = true;
+                        if(commandSection) commandSection.style.display = 'none';
+                        if(commandButton) commandButton.disabled = true;
+                        if(commandInput) commandInput.disabled = true;
+                        if(commandPasswordInput) commandPasswordInput.disabled = true;
                         // Keep output area visible after run
                         break;
                     case 'starting':
                     case 'stopping':
                         startButton.disabled = true;
                         stopButton.disabled = true;
+                        if(commandButton) commandButton.disabled = true;
+                        if(commandInput) commandInput.disabled = true;
+                        if(commandPasswordInput) commandPasswordInput.disabled = true;
+                        if(commandSection && state === 'stopping') {
+                            // Keep command section visible during stopping if it was already visible
+                        } else if (commandSection) {
+                            commandSection.style.display = 'none';
+                        }
                         break;
                 }
             }
@@ -768,9 +964,11 @@ if __name__ == '__main__':
         print("Please create the directory or correct the SERVERS_BASE_DIR path in the script.")
         exit(1)
     if PASSWORD == "password":
-         print("WARNING: Default password is being used. Please change the PASSWORD variable in the script.")
+         print("WARNING: Default admin password is being used. Please change the PASSWORD variable in the script.")
+    if COMMAND_PASSWORD == "cmdpass":
+         print("WARNING: Default command password is being used. Please change the COMMAND_PASSWORD variable in the script.")
     if SECRET_KEY == secrets.token_hex(24):
-        print("INFO: Using a randomly generated SECRET_KEY. For consistent sessions across restarts, set the FLASK_SECRET_KEY environment variable.")
+        print("INFO: Using a randomly generated SECRET_KEY. For consistent sessions across restarts, set the FLASK_SECRET_KEY environment variable or a fixed value in the script.")
 
     print(f"Starting server control panel...")
     print(f" - Monitoring directory: {SERVERS_BASE_DIR}")
