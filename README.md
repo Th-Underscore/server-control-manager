@@ -2,6 +2,8 @@
 
 A simple web-based control panel built with Flask to manage and monitor server processes launched via batch files.
 
+![scm-app](image.png)
+
 ## Features
 
 *   **Web Interface:** Easy-to-use interface to start, stop, and monitor servers.
