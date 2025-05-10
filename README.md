@@ -7,13 +7,13 @@ A simple web-based control panel built with Flask to manage and monitor server p
 ## Features
 
 *   **Web Interface:** Easy-to-use interface to start, stop, and monitor servers.
-*   **Process Management:** Finds server folders containing a specified batch file (`starter.bat` by default) within a base directory.
-*   **Real-time Output:** Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
-*   **Authentication:** Secure login system using Flask-Login to protect access.
-*   **Rate Limiting:** Basic protection against brute-force login attempts (defaults to 200 per day, 50 per hour).
-*   **Command Sending:** Send commands directly to the stdin of running server processes (requires a command password).
+    *   **Process Management:** Finds server folders containing a specified batch file (`starter.bat` by default) within a base directory.
+    *   **Real-time Output:** Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
+    *   **Command Execution:** Send commands directly to the stdin of running server processes (requires a command password).
+    *   **Logs:** View each and every server's log files.
+    *   **Authentication:** Secure login system using Flask-Login to protect access.
+    *   **SSL Support:** Optional SSL/TLS encryption for secure connections (requires certificate and key files).
 *   **Backup Copy:** Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
-*   **SSL Support:** Optional SSL/TLS encryption for secure connections (requires certificate and key files).
 *   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
 ## Requirements
@@ -115,3 +115,7 @@ SERVERS_BASE_DIR/
 *   Keep your `SECRET_KEY` confidential.
 *   Run this application on a trusted network. If exposing it externally, ensure proper firewall rules and consider using a production-grade WSGI server (like Gunicorn or Waitress) behind a reverse proxy (like Nginx or Apache) instead of the Flask development server.
 *   Enable SSL/TLS for encrypted communication, especially if accessed over untrusted networks.
+
+## To-Do
+
+*   Add support for automatically finding an open port for each process
