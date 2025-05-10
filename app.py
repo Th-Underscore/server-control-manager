@@ -10,6 +10,8 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
+import gzip
+from datetime import datetime
 
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
@@ -546,6 +548,272 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
 
+# --- Server-Specific Log Viewing ---
+LOGS_PER_PAGE = 15
+
+SERVER_LOGS_LIST_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs for {{ server_name }} - Server Control Panel</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
+        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: #555; }
+        .container { max-width: 900px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        .flash-messages { list-style: none; padding: 0; margin-bottom: 15px; }
+        .flash-messages li { padding: 10px 15px; margin-bottom: 10px; border-radius: 4px; }
+        .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
+        th { background-color: #f0f0f0; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .pagination { margin-top: 20px; text-align: center; }
+        .pagination a, .pagination span { display: inline-block; padding: 8px 12px; margin: 0 2px; border: 1px solid #ddd; border-radius: 4px; color: #007bff; }
+        .pagination span.current { background-color: #007bff; color: white; border-color: #007bff; }
+        .pagination span.disabled { color: #ccc; border-color: #eee; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: #5a6268; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <span>Server Manager - Logs for {{ server_name }}</span>
+        <span><a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+    </div>
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    <li class="flash-{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        <h1>Logs for Server: {{ server_name }}</h1>
+        {% if log_files %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Filename</th>
+                        <th>Last Modified</th>
+                        <th>Size (Bytes)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in log_files %}
+                    <tr>
+                        <td>{{ log.name }}</td>
+                        <td>{{ log.modified_time }}</td>
+                        <td>{{ log.size }}</td>
+                        <td><a href="{{ url_for('view_server_log_file', server_name=server_name, log_filename=log.name) }}">View</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if total_pages > 1 %}
+            <div class="pagination">
+                {% if current_page > 1 %}
+                    <a href="{{ url_for('list_server_logs_paginated', server_name=server_name, page=current_page-1) }}">&laquo; Prev</a>
+                {% else %}
+                    <span class="disabled">&laquo; Prev</span>
+                {% endif %}
+
+                {% for page_num in range(1, total_pages + 1) %}
+                    {% if page_num == current_page %}
+                        <span class="current">{{ page_num }}</span>
+                    {# Show nearby pages, and always first/last page with ellipsis if needed #}
+                    {% elif page_num == 1 or page_num == total_pages or (page_num >= current_page - 2 and page_num <= current_page + 2) %}
+                        {# Add ellipsis if not adjacent to shown numbers and not first/last page #}
+                        {% if page_num == 1 and current_page > 4 and current_page - 2 > 2 %} {# Ellipsis after first page #}
+                            <span>...</span>
+                        {% elif page_num == total_pages and current_page < total_pages - 3 and current_page + 2 < total_pages -1 %} {# Ellipsis before last page #}
+                            <span>...</span>
+                        {% endif %}
+                        <a href="{{ url_for('list_server_logs_paginated', server_name=server_name, page=page_num) }}">{{ page_num }}</a>
+                    {% elif (page_num == current_page - 3 and current_page > 4) or (page_num == current_page + 3 and current_page < total_pages - 3) %} {# Ensure ellipsis is shown once #}
+                        <span>...</span>
+                    {% endif %}
+                {% endfor %}
+
+                {% if current_page < total_pages %}
+                    <a href="{{ url_for('list_server_logs_paginated', server_name=server_name, page=current_page+1) }}">Next &raquo;</a>
+                {% else %}
+                    <span class="disabled">Next &raquo;</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        {% else %}
+            <p>No log files found in the 'logs' directory for server '{{ server_name }}', or the directory is not accessible.</p>
+            <p>Expected path: {{ server_logs_path }}</p>
+        {% endif %}
+        <a href="{{ url_for('index') }}" class="back-link">Back to Main Panel</a>
+    </div>
+</body>
+</html>
+"""
+
+SERVER_LOG_VIEW_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Log: {{ log_filename }} ({{ server_name }}) - Server Control Panel</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
+        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: #555; }
+        .container { max-width: 1200px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        .log-content { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; max-height: 70vh; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: #5a6268; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <span>Server Manager - Log Viewer</span>
+        <span><a href="{{ url_for('list_server_logs_default', server_name=server_name) }}">Back to {{ server_name }} Logs</a> | <a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+    </div>
+    <div class="container">
+        <h1>Log: {{ log_filename }} <small>(Server: {{ server_name }})</small></h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    <li class="flash-{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        <div class="log-content">
+            {{ log_content }}
+        </div>
+        <a href="{{ url_for('list_server_logs_default', server_name=server_name) }}" class="back-link">Back to {{ server_name }} Log List</a>
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/server/<server_name>/logs/', defaults={'page': 1}, endpoint='list_server_logs_default')
+@app.route('/server/<server_name>/logs/page/<int:page>', endpoint='list_server_logs_paginated')
+@login_required
+def list_server_logs(server_name, page):
+    servers = get_server_folders()
+    if server_name not in servers:
+        flash(f"Server '{server_name}' not found.", "danger")
+        return redirect(url_for('index'))
+
+    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+    server_logs_path = os.path.join(server_path, 'logs')
+
+    if not os.path.isdir(server_logs_path):
+        flash(f"Logs directory not found for server '{server_name}' at {server_logs_path}", "warning")
+        return render_template_string(SERVER_LOGS_LIST_TEMPLATE, server_name=server_name, log_files=[],
+                                      current_page=1, total_pages=0, server_logs_path=server_logs_path, username=current_user.username)
+
+    all_log_files_details = []
+    try:
+        for item_name in os.listdir(server_logs_path):
+            if item_name.endswith(('.log', '.log.gz')): # NOTE: Filter for log files
+                full_path = os.path.join(server_logs_path, item_name)
+                if os.path.isfile(full_path):
+                    try:
+                        stat_info = os.stat(full_path)
+                        all_log_files_details.append({
+                            'name': item_name,
+                            'modified_time_obj': datetime.fromtimestamp(stat_info.st_mtime), # For sorting
+                            'size': stat_info.st_size
+                        })
+                    except OSError as e:
+                        print(f"Could not stat file {full_path} for server {server_name}: {e}")
+                        flash(f"Could not access metadata for {item_name} in {server_name}'s logs.", "warning")
+        
+        # NOTE: Sort logs by modification time (datetime object), newest first.
+        all_log_files_details.sort(key=lambda x: x['modified_time_obj'], reverse=True)
+        
+        # NOTE: Convert datetime to string for display after sorting
+        for log_file in all_log_files_details:
+            log_file['modified_time'] = log_file['modified_time_obj'].strftime('%Y-%m-%d %H:%M:%S')
+            del log_file['modified_time_obj'] # Remove temporary sort key
+
+    except OSError as e:
+        flash(f"Error reading logs directory for server '{server_name}': {e}", "danger")
+        print(f"Error reading logs directory {server_logs_path}: {e}")
+        return render_template_string(SERVER_LOGS_LIST_TEMPLATE, server_name=server_name, log_files=[],
+                                      current_page=1, total_pages=0, server_logs_path=server_logs_path, username=current_user.username)
+
+    total_files = len(all_log_files_details)
+    total_pages = (total_files + LOGS_PER_PAGE - 1) // LOGS_PER_PAGE
+    # NOTE: Ensure current_page is within valid bounds
+    current_page = max(1, min(page, total_pages if total_pages > 0 else 1))
+    
+    start_index = (current_page - 1) * LOGS_PER_PAGE
+    end_index = start_index + LOGS_PER_PAGE
+    paginated_log_files = all_log_files_details[start_index:end_index]
+
+    return render_template_string(SERVER_LOGS_LIST_TEMPLATE,
+                                  server_name=server_name,
+                                  log_files=paginated_log_files,
+                                  current_page=current_page,
+                                  total_pages=total_pages,
+                                  server_logs_path=server_logs_path, # Pass for display if no logs found
+                                  username=current_user.username)
+
+
+@app.route('/server/<server_name>/logs/view/<path:log_filename>')
+@login_required
+def view_server_log_file(server_name, log_filename):
+    servers = get_server_folders()
+    if server_name not in servers:
+        flash(f"Server '{server_name}' not found.", "danger")
+        return redirect(url_for('index'))
+
+    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+    server_logs_path = os.path.join(server_path, 'logs')
+    
+    # NOTE: Security: Normalize paths and check if the requested file is within the server's log directory
+    normalized_server_logs_path = os.path.abspath(server_logs_path)
+    # NOTE: Ensure log_filename is treated as a relative path component and re-join with the normalized log path
+    # This helps prevent issues if log_filename somehow contains '..'
+    requested_log_file_path = os.path.abspath(os.path.join(normalized_server_logs_path, os.path.basename(log_filename)))
+
+
+    if not requested_log_file_path.startswith(normalized_server_logs_path) or \
+       not os.path.isfile(requested_log_file_path) or \
+       not (log_filename.endswith('.log') or log_filename.endswith('.log.gz')): # Ensure it's a log file
+        abort(404, f"Log file '{log_filename}' not found, is not a valid log file, or access denied for server '{server_name}'.")
+
+    content = ""
+    try:
+        if log_filename.endswith('.gz'):
+            with gzip.open(requested_log_file_path, 'rt', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        else:
+            with open(requested_log_file_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+    except Exception as e:
+        flash(f"Error reading log file '{log_filename}' for server '{server_name}': {e}", "danger")
+        print(f"Error reading log file {requested_log_file_path}: {e}")
+        content = f"--- ERROR READING FILE ---\n{e}\nPath: {requested_log_file_path}" # Add path for debugging
+    
+    return render_template_string(SERVER_LOG_VIEW_TEMPLATE,
+                                  server_name=server_name,
+                                  log_filename=log_filename,
+                                  log_content=content,
+                                  username=current_user.username)
+
+
 # --- HTML Templates ---
 
 # Template for the main control panel
@@ -581,6 +849,8 @@ HTML_TEMPLATE = """
         .stop-button:hover:not(:disabled) { background-color: #c82333; }
         .command-button { background-color: #007bff; color: white; }
         .command-button:hover:not(:disabled) { background-color: #0056b3; }
+        .logs-button { background-color: #17a2b8; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
+        .logs-button:hover { background-color: #138496; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .status { font-style: italic; color: #666; font-size: 0.9em; min-width: 80px; text-align: right; }
         .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
@@ -617,6 +887,7 @@ HTML_TEMPLATE = """
                         <span class="server-name">{{ server }}</span>
                         <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
                         <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
+                        <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
                         <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
                     </div>
                     <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
