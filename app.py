@@ -4,6 +4,8 @@ import threading
 import time
 import shutil
 import secrets
+import signal
+import sys
 from dotenv import load_dotenv
 from flask import Flask, render_template_string, request, Response, jsonify, stream_with_context, redirect, url_for, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -31,6 +33,9 @@ SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"    # "C:\\Users\\Me\\server.key"
 # ---------------------
+
+# --- Global flag to indicate shutdown ---
+shutting_down = False
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = SECRET_KEY
@@ -145,9 +150,18 @@ def read_process_output(server_name, process):
         if server_name in running_processes:
             with running_processes[server_name]['lock']:
                 if not running_processes[server_name]['stop_requested']:
-                     running_processes[server_name]['output'].append("--- SCRIPT FINISHED ---")
-                     # Keep the entry but mark process as None to indicate it finished
-                     running_processes[server_name]['process'] = None
+                    running_processes[server_name]['output'].append("--- SCRIPT FINISHED ---")
+                    
+                    # --- Backup Copy ---
+                    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+                    try:
+                        copy_latest_backup(server_name, server_path)
+                    except Exception as backup_e:
+                        print(f"Critical error calling backup function for {server_name}: {backup_e}")
+                    # --------------------
+
+                    print(f"Process for {server_name} exited.")
+                    running_processes[server_name]['process'] = None
 
 # --- Backup Helper ---
 def _log_to_server_output(server_name, message):
@@ -1226,20 +1240,97 @@ LOGIN_TEMPLATE = """
 """
 
 
+# --- Cleanup and Signal Handling ---
+def cleanup_processes():
+    """Attempts to stop all running server processes."""
+    global running_processes
+    global shutting_down
+    
+    if shutting_down: # Avoid re-entry if already called
+        return
+
+    shutting_down = True
+    print(" - Initiating shutdown of all running server subprocesses...")
+    
+    server_names_to_stop = list(running_processes.keys())
+
+    for server_name in server_names_to_stop:
+        process_info = running_processes.get(server_name)
+        if process_info and process_info.get('process'):
+            process = process_info['process']
+            with process_info['lock']:
+                if process.poll() is None:
+                    print(f" - Stopping server {server_name} (PID: {process.pid}):")
+                    process_info['stop_requested'] = True
+                    if 'output' in process_info:
+                        process_info['output'].append("--- MAIN APP SHUTDOWN: STOP REQUESTED ---")
+                    
+                    try:
+                        # Using Popen for taskkill to allow timeout and non-blocking
+                        kill_proc = subprocess.Popen(['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        try:
+                            kill_proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            print(f"   - taskkill for {server_name} (PID: {process.pid}) timed out. Process might still be terminating.")
+                            kill_proc.kill()
+
+                        # Check process status after attempting taskkill
+                        if process.poll() is None:
+                            print(f"   - Process {process.pid} for {server_name} did not terminate via taskkill, forcing kill...")
+                            process.kill() # Force kill the original process
+                            try:
+                                process.wait(timeout=5) # Wait for forced kill
+                            except subprocess.TimeoutExpired:
+                                print(f"   - Forced kill for {server_name} (PID: {process.pid}) timed out.")
+                        
+                        status = "stopped" if process.poll() is not None else "failed to stop"
+                        if 'output' in process_info:
+                            process_info['output'].append(f"--- MAIN APP SHUTDOWN: SCRIPT {status.upper()} ---")
+                        print(f"   - Server {server_name} {status} during main app shutdown")
+                        process_info['process'] = None
+                    except Exception as e:
+                        print(f"   - Error stopping {server_name} during main app shutdown: {e}")
+                        if 'output' in process_info:
+                            process_info['output'].append(f"--- MAIN APP SHUTDOWN: ERROR STOPPING SCRIPT: {e} ---")
+                else:
+                    if process_info.get('process') is None and 'output' in process_info:
+                        process_info['output'].append(f"--- MAIN APP SHUTDOWN: Server {server_name} already stopped or not fully started ---")
+                    print(f" - Server {server_name} already stopped")
+
+    print("All subprocesses handled")
+
+def signal_handler(sig, frame):
+    """Handles SIGINT (Ctrl+C) and SIGTERM for graceful shutdown."""
+    print(f"Signal {signal.Signals(sig).name} received, initiating graceful shutdown...")
+    cleanup_processes()
+    print("Flask app exiting...")
+    sys.exit(0)
+
+
 # --- Main Execution ---
 if __name__ == '__main__':
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    try:
+        signal.signal(signal.SIGTERM, signal_handler)
+    except AttributeError: # SIGTERM may not be available on all Windows versions/Python builds
+        print("SIGTERM signal not available on this platform. SIGINT (Ctrl+C) is handled.")
+    except ValueError: # Can happen if trying to register a signal not supported
+        print("Could not register SIGTERM handler. SIGINT (Ctrl+C) is handled.")
+
     # Basic validation
     if not os.path.isdir(SERVERS_BASE_DIR):
         print(f"ERROR: The specified servers base directory does not exist:")
         print(f"  '{SERVERS_BASE_DIR}'")
         print("Please create the directory or correct the SERVERS_BASE_DIR path in the script.")
-        exit(1)
+        sys.exit(1)
     if PASSWORD == "password":
          print("WARNING: Default admin password is being used. Please change the PASSWORD variable in the script.")
     if COMMAND_PASSWORD == "cmdpass":
          print("WARNING: Default command password is being used. Please change the COMMAND_PASSWORD variable in the script.")
-    if SECRET_KEY == secrets.token_hex(24):
-        print("INFO: Using a randomly generated SECRET_KEY. For consistent sessions across restarts, set the FLASK_SECRET_KEY environment variable or a fixed value in the script.")
+    if "FLASK_SECRET_KEY" not in os.environ and SECRET_KEY == _generated_secret_key_default:
+        print("INFO: Using a randomly generated SECRET_KEY for this session because FLASK_SECRET_KEY environment variable is not set. For consistent sessions across restarts, set this environment variable or a fixed value in the script.")
 
     print(f"Starting server control panel...")
     print(f" - Monitoring directory: {SERVERS_BASE_DIR}")
@@ -1259,7 +1350,18 @@ if __name__ == '__main__':
 
 
     # Use Flask's development server (or deploy with a production server like Waitress/Gunicorn)
-    # Use threaded=True to handle multiple requests (like SSE and actions) concurrently
-    #app.run(host=HOST, port=PORT, debug=False, threaded=True, ssl_context=ssl_context)
-    # To run *without* SSL/TLS if certs don't exist or aren't needed:
-    app.run(host=HOST, port=PORT, debug=False, threaded=True)
+    try:
+        # Use threaded=True to handle multiple requests (like SSE and actions) concurrently
+        # use_reloader=False is important for custom signal handling to work reliably,
+        # especially on Windows, as the reloader runs the app in a child process.
+        
+        #app.run(host=HOST, port=PORT, debug=False, threaded=True, ssl_context=ssl_context, use_reloader=False)
+        app.run(host=HOST, port=PORT, debug=False, threaded=True, use_reloader=False)
+    except KeyboardInterrupt:
+        print("\nKeyboardInterrupt caught in main __name__ block. Ensuring cleanup...")
+        cleanup_processes() # Ensure cleanup is attempted
+    finally:
+        if not shutting_down: # If signal_handler wasn't called or didn't complete
+            print("Application exiting without explicit signal handling completion. Attempting final cleanup...")
+            cleanup_processes()
+        print("Finished!")
