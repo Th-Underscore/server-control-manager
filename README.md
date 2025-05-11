@@ -66,20 +66,25 @@ Before running the application, you **must** configure the following variables a
 
 The application expects the following structure within your `SERVERS_BASE_DIR`:
 
-```
+```yaml
 SERVERS_BASE_DIR/
 ├── ServerA/
-│   ├── starter.bat         # Executable to start the server
-│   ├── server_files/       # Other server files/data
-│   └── backups/            # Optional: Folder for server backups
-│       ├── backup_2024-01-01_1000/
-│       └── backup_2024-01-02_1200/ # Latest backup folder will be copied
+│   ├── starter.bat  # Executable to start the server
+│   ├── ...          # Other server files/data
+│   ├── backups/     # Optional: Folder for server backups
+│   │   ├── backup_2024-01-01_1000/
+│   │   └── backup_2024-01-02_1200/  # Latest backup folder will be copied
+│   └── logs/        # Optional: Folder for output logs
+│       ├── 2024-01-02-1.log.gz  # Old log files will be decompressed when viewed in the UI
+│       ├── debug-1.log.gz
+│       ├── latest.log
+│       └── debug.log
 ├── ServerB/
 │   ├── starter.bat
 │   └── ...
-└── Backups/                            # Automatically created by the script inside SERVERS_BASE_DIR
-    ├── ServerA_backup_2024-01-02_1200/ # Copied backup from ServerA
-    └── ...                             # Other copied backups
+└── Backups/  # Automatically created by the script inside SERVERS_BASE_DIR
+    ├── ServerA_backup_2024-01-02_1200/  # Copied backup from ServerA (requires manual cleanup)
+    └── ...                              # Other copied backups
 ```
 
 *   Each direct subfolder in `SERVERS_BASE_DIR` is treated as a potential server.
