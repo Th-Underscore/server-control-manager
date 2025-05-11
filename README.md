@@ -71,14 +71,14 @@ SERVERS_BASE_DIR/
 ├── ServerA/
 │   ├── starter.bat  # Executable to start the server
 │   ├── ...          # Other server files/data
-│   ├── backups/     # Optional: Folder for server backups
-│   │   ├── backup_2024-01-01_1000/
-│   │   └── backup_2024-01-02_1200/  # Latest backup folder will be copied
-│   └── logs/        # Optional: Folder for output logs
-│       ├── 2024-01-02-1.log.gz  # Old log files will be decompressed when viewed in the UI
-│       ├── debug-1.log.gz
-│       ├── latest.log
-│       └── debug.log
+│   ├── logs/        # Folder for output logs
+│   │   ├── 2024-01-02-1.log.gz  # Old log files will be decompressed when viewed in the UI
+│   │   ├── debug-1.log.gz
+│   │   ├── latest.log
+│   │   └── debug.log
+│   └── backups/     # Optional: Folder for server backups
+│       ├── backup_2024-01-01_1000/
+│       └── backup_2024-01-02_1200/  # Latest backup folder or file will be copied
 ├── ServerB/
 │   ├── starter.bat
 │   └── ...
