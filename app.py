@@ -7,7 +7,7 @@ import secrets
 import signal
 import sys
 from dotenv import load_dotenv
-from flask import Flask, render_template_string, request, Response, jsonify, stream_with_context, redirect, url_for, flash, abort
+from flask import Flask, render_template_string, request, Response, jsonify, stream_with_context, redirect, url_for, flash, abort, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -28,10 +28,12 @@ PASSWORD = os.getenv("PASSWORD", "password")             # !!! CHANGE THIS PASSW
 COMMAND_PASSWORD = os.getenv("CMD_PASSWORD", "cmdpass")  # !!! CHANGE THIS COMMAND PASSWORD !!!
 # Generate a strong secret key. Keep this key secret and consistent across restarts.
 # For production, set this via environment variable or config file.
-SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(24))
+_generated_secret_key_default = secrets.token_hex(24)
+SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", _generated_secret_key_default)
 # SSL Certificate (Optional - uncomment app.run line below to enable)
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"    # "C:\\Users\\Me\\server.key"
+MAX_LOG_LINES = 1000                                       # Max console lines to keep in memory
 # ---------------------
 
 # --- Global flag to indicate shutdown ---
@@ -87,7 +89,25 @@ def load_user(user_id):
 
 # --- Process Management ---
 # In-memory storage for running processes and their output
-running_processes = {} # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False} }
+running_processes = {} # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False, 'graceful_stop_timer': None} }
+ 
+def get_server_properties(server_path):
+    """Parses server.properties file and returns a dictionary of key-value pairs."""
+    properties = {}
+    properties_file = os.path.join(server_path, 'server.properties')
+    if os.path.isfile(properties_file):
+        try:
+            with open(properties_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            properties[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"Error reading server.properties for {os.path.basename(server_path)}: {e}")
+    return properties
+
 
 # --- Helper Functions (get_server_folders, read_process_output - unchanged from previous version) ---
 def get_server_folders():
@@ -120,6 +140,9 @@ def read_process_output(server_name, process):
             with process_info['lock']:
                 if not process_info['stop_requested']:
                     process_info['output'].append(decoded_line)
+                    # Trim the output list to save memory
+                    if len(process_info['output']) > MAX_LOG_LINES:
+                        process_info['output'].pop(0)
                 else:
                     break # Exit if stop was requested
             # time.sleep(0.01) # Optional sleep
@@ -129,6 +152,8 @@ def read_process_output(server_name, process):
              with process_info['lock']:
                  if not process_info['stop_requested']:
                      process_info['output'].append(decoded_line)
+                     if len(process_info['output']) > MAX_LOG_LINES:
+                        process_info['output'].pop(0)
                  else:
                      break
              # time.sleep(0.01)
@@ -184,7 +209,7 @@ def find_latest_backup_folder(backup_dir):
     if not os.path.isdir(backup_dir):
         return None
     try:
-        items = os.listdir(backup_dir)
+        items = [item for item in os.listdir(backup_dir) if not item.endswith('.json')]
         if not items:
             return None
         # Sort items alphabetically/numerically - assumes naming convention allows this
@@ -305,10 +330,19 @@ def logout():
 def index():
     """Serves the main control panel page."""
     servers = get_server_folders()
+    server_details = {}
+    for server_name in servers:
+        server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+        properties = get_server_properties(server_path)
+        server_details[server_name] = {
+            'motd': properties.get('motd', 'No MOTD found'),
+            'version': properties.get('version', '') # Assuming 'version' might be in server.properties
+        }
+
     # Pass server status (running or not) to the template
     server_status = {name: (proc_info['process'] is not None and proc_info['process'].poll() is None)
                      for name, proc_info in running_processes.items() if proc_info and 'process' in proc_info}
-    return render_template_string(HTML_TEMPLATE, servers=servers, server_status=server_status, username=current_user.username)
+    return render_template_string(HTML_TEMPLATE, servers=servers, server_status=server_status, server_details=server_details, username=current_user.username)
 
 @app.route('/start/<server_name>', methods=['GET', 'POST']) # <--- Allow both GET and POST
 @login_required
@@ -411,7 +445,7 @@ def start_server(server_name):
 @app.route('/stop/<server_name>', methods=['POST'])
 @login_required
 def stop_server(server_name):
-    """Stops the running batch file for the specified server."""
+    """Initiates a graceful stop for the specified server."""
     global running_processes
 
     if server_name not in running_processes or not running_processes[server_name].get('process'):
@@ -420,50 +454,100 @@ def stop_server(server_name):
     process_info = running_processes[server_name]
     process = process_info['process']
 
-    # Use lock for thread safety when accessing process info
     with process_info['lock']:
         if process.poll() is not None:
-             return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
+            return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
+        
+        if process_info.get('stop_requested'):
+            return jsonify({"status": "info", "message": "Stop already in progress."}), 202
 
         try:
-            print(f"Attempting to stop process for {server_name} (PID: {process.pid})...")
+            print(f"Attempting graceful stop for {server_name} (PID: {process.pid})...")
+            process_info['output'].append("--- GRACEFUL STOP REQUESTED ---")
+            process_info['output'].append(">>> Sending 'stop' command...")
+            
+            # Send 'stop' command
+            process.stdin.write(b'stop\n')
+            process.stdin.flush()
+            
             process_info['stop_requested'] = True
-            process_info['output'].append("--- STOP REQUESTED ---")
 
-            # Terminate the process group (Windows specific)
-            subprocess.call(['taskkill', '/F', '/T', '/PID', str(process.pid)])
+            # Start a timer to force stop after a delay
+            def force_stop_after_delay():
+                time.sleep(60) # 60-second timeout
+                if server_name in running_processes:
+                    proc_info_timer = running_processes[server_name]
+                    with proc_info_timer['lock']:
+                        # Check if the process is still running and a stop was requested
+                        if proc_info_timer.get('process') and proc_info_timer['process'].poll() is None and proc_info_timer.get('stop_requested'):
+                            print(f"Graceful stop for {server_name} timed out. Forcing termination.")
+                            proc_info_timer['output'].append("--- GRACEFUL STOP TIMEOUT: FORCING STOP ---")
+                            _force_kill_process(server_name, proc_info_timer)
 
-            time.sleep(1)
+            timer_thread = threading.Thread(target=force_stop_after_delay, daemon=True)
+            timer_thread.start()
+            process_info['graceful_stop_timer'] = timer_thread
 
-            # Check if it's really stopped (poll doesn't need lock)
-            if process.poll() is None:
-                 print(f"Process {process.pid} did not terminate gracefully, forcing kill...")
-                 process.kill()
-                 process.wait(timeout=5) # Wait briefly for kill confirmation
-
-            final_status = "stopped" if process.poll() is not None else "failed to stop"
-            process_info['output'].append(f"--- SCRIPT {final_status.upper()} ---")
-            process_info['process'] = None
-
-            # --- Backup Copy ---
-            backup_message = "Backup copy not attempted."
-            if final_status == "stopped": # Only attempt backup if stop was successful
-                server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-                try:
-                    backup_message = copy_latest_backup(server_name, server_path)
-                except Exception as backup_e:
-                    print(f"Critical error calling backup function for {server_name}: {backup_e}")
-                    backup_message = "Backup function failed critically."
-            # --------------------
-
-            print(f"Process for {server_name} {final_status}.")
-            response_message = f"{server_name} {final_status}. {backup_message}."
-            return jsonify({"status": "success", "message": response_message})
+            return jsonify({"status": "success", "message": "Graceful stop initiated. Server will be force-stopped in 60 seconds if it doesn't exit."})
 
         except Exception as e:
-            print(f"Error stopping {server_name}: {e}")
-            process_info['output'].append(f"--- ERROR STOPPING SCRIPT: {e} ---")
-            return jsonify({"status": "error", "message": f"Error stopping {server_name}: {e}"}), 500
+            print(f"Error initiating graceful stop for {server_name}: {e}")
+            process_info['output'].append(f"--- ERROR INITIATING GRACEFUL STOP: {e} ---")
+            return jsonify({"status": "error", "message": f"Error initiating graceful stop: {e}"}), 500
+
+def _force_kill_process(server_name, process_info):
+    """Internal helper to forcefully terminate a process. Assumes lock is held."""
+    process = process_info.get('process')
+    if not process or process.poll() is not None:
+        return "already stopped"
+
+    print(f"Force killing process for {server_name} (PID: {process.pid})...")
+    try:
+        subprocess.call(['taskkill', '/F', '/T', '/PID', str(process.pid)])
+        time.sleep(1) # Give it a moment
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        
+        final_status = "stopped" if process.poll() is not None else "failed to stop"
+        process_info['output'].append(f"--- SCRIPT FORCE {final_status.upper()} ---")
+        process_info['process'] = None
+        
+        # Trigger backup on successful forced stop
+        if final_status == "stopped":
+            server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+            try:
+                copy_latest_backup(server_name, server_path)
+            except Exception as backup_e:
+                print(f"Critical error calling backup function for {server_name} after force kill: {backup_e}")
+        
+        return final_status
+    except Exception as e:
+        print(f"Error during force kill for {server_name}: {e}")
+        process_info['output'].append(f"--- ERROR DURING FORCE KILL: {e} ---")
+        return "error"
+
+@app.route('/force_stop/<server_name>', methods=['POST'])
+@login_required
+def force_stop_server(server_name):
+    """Forcefully stops the running server process."""
+    global running_processes
+
+    if server_name not in running_processes or not running_processes[server_name].get('process'):
+        return jsonify({"status": "error", "message": f"{server_name} is not running or already stopped."}), 404
+
+    process_info = running_processes[server_name]
+    with process_info['lock']:
+        if process_info['process'].poll() is not None:
+            return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
+        
+        process_info['output'].append("--- MANUAL FORCE STOP REQUESTED ---")
+        final_status = _force_kill_process(server_name, process_info)
+        
+        if final_status != "error":
+            return jsonify({"status": "success", "message": f"{server_name} forcefully {final_status}."})
+        else:
+            return jsonify({"status": "error", "message": f"An error occurred while trying to force stop {server_name}."}), 500
 
 
 @app.route('/output/<server_name>')
@@ -561,6 +645,21 @@ def send_command(server_name):
             process_info['output'].append(f"--- ERROR SENDING COMMAND: {e} ---")
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
+@app.route('/public/<server_name>/<path:filename>')
+@login_required
+def public_files(server_name, filename):
+   """Serves files from the public directory of a server."""
+   servers = get_server_folders()
+   if server_name not in servers:
+       abort(404, "Server not found.")
+
+   server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+   public_dir = os.path.join(server_path, 'public')
+
+   if not os.path.isdir(public_dir):
+       abort(404, "Public directory not found for this server.")
+
+   return send_from_directory(public_dir, filename)
 
 # --- Server-Specific Log Viewing ---
 LOGS_PER_PAGE = 15
@@ -854,16 +953,19 @@ HTML_TEMPLATE = """
         .server-item { background: #e9e9e9; margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
         .server-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .server-name { font-weight: bold; flex-grow: 1; min-width: 100px; }
+        .server-version { color: #6c757d; font-style: italic; font-size: 0.9em; }
         button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
         button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
         input[type="text"], input[type="password"] { border: 1px solid #ccc; }
         .start-button { background-color: #28a745; color: white; }
         .start-button:hover:not(:disabled) { background-color: #218838; }
         .stop-button { background-color: #dc3545; color: white; }
+        .force-stop-button { background-color: #b32532; color: white; display: none; } /* Initially hidden */
         .stop-button:hover:not(:disabled) { background-color: #c82333; }
         .command-button { background-color: #007bff; color: white; }
         .command-button:hover:not(:disabled) { background-color: #0056b3; }
         .logs-button { background-color: #17a2b8; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
+        .public-button { background-color: #ffc107; color: #212529; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
         .logs-button:hover { background-color: #138496; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .status { font-style: italic; color: #666; font-size: 0.9em; min-width: 80px; text-align: right; }
@@ -871,6 +973,8 @@ HTML_TEMPLATE = """
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
         .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
+        .output-container { position: relative; }
+        .scroll-to-bottom { position: absolute; bottom: 10px; right: 10px; background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: none; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
     </style>
 </head>
@@ -899,9 +1003,12 @@ HTML_TEMPLATE = """
                 <li class="server-item" id="server-{{ server }}">
                     <div class="server-controls">
                         <span class="server-name">{{ server }}</span>
+                        <span class="server-version"><em>{{ server_details[server]['motd'] }}</em></span>
                         <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
                         <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
+                        <button class="force-stop-button" data-server="{{ server }}">Force Stop</button>
                         <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
+                        <a href="{{ url_for('public_files', server_name=server, filename='index.html') }}" class="public-button" data-server="{{ server }}">Public Files</a>
                         <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
                     </div>
                     <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
@@ -909,8 +1016,11 @@ HTML_TEMPLATE = """
                         <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
                         <button class="command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Send</button>
                     </div>
-                    <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
-                        <div class="output-title">Output for {{ server }}:</div>
+                    <div class="output-container">
+                        <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
+                            <div class="output-title">Output for {{ server }}:</div>
+                        </div>
+                        <button class="scroll-to-bottom" id="scroll-{{ server }}">&darr;</button>
                     </div>
                 </li>
                 {% endfor %}
@@ -930,6 +1040,7 @@ HTML_TEMPLATE = """
                 const serverName = item.id.replace('server-', '');
                 const startButton = item.querySelector('.start-button');
                 const stopButton = item.querySelector('.stop-button');
+                const forceStopButton = item.querySelector('.force-stop-button');
                 const statusSpan = item.querySelector('.status');
                 const outputArea = item.querySelector('.output-area');
                 const commandSection = item.querySelector('.command-section');
@@ -941,6 +1052,7 @@ HTML_TEMPLATE = """
                 // --- Event Handlers ---
                 startButton.addEventListener('click', () => handleStart(serverName));
                 stopButton.addEventListener('click', () => handleStop(serverName));
+                forceStopButton.addEventListener('click', () => handleForceStop(serverName));
                 if (commandButton) { // Ensure command button exists
                     commandButton.addEventListener('click', () => handleSendCommand(serverName));
                 }
@@ -983,31 +1095,51 @@ HTML_TEMPLATE = """
             }
 
             function handleStop(serverName) {
-                console.log(`Stopping ${serverName}...`);
+                console.log(`Requesting graceful stop for ${serverName}...`);
                 updateUI(serverName, 'stopping', 'Stopping...');
                 fetch(`/stop/${serverName}`, { method: 'POST' })
-                     .then(response => {
-                        if (!response.ok) {
-                             return response.json().then(err => { throw new Error(err.message || `HTTP error ${response.status}`) });
-                        }
-                        return response.json();
-                    })
+                    .then(response => response.json())
                     .then(data => {
                         if (data.status === 'success') {
-                            console.log(`${serverName} stop requested.`);
-                            // Status will be updated via SSE when process actually ends
+                            console.log(`Graceful stop for ${serverName} initiated.`);
+                            // Show the "Force Stop" button
+                            const forceStopButton = document.querySelector(`.force-stop-button[data-server="${serverName}"]`);
+                            if (forceStopButton) forceStopButton.style.display = 'inline-block';
                         } else {
-                            console.error(`Error stopping ${serverName}:`, data.message);
-                            alert(`Error stopping ${serverName}: ${data.message}`);
-                            const statusSpan = document.getElementById(`status-${serverName}`);
-                            updateUI(serverName, statusSpan.textContent.toLowerCase() === 'running' ? 'running' : 'stopped', 'Error Stopping');
+                            console.error(`Error initiating stop for ${serverName}:`, data.message);
+                            alert(`Error initiating stop for ${serverName}: ${data.message}`);
+                            updateUI(serverName, 'running', 'Running'); // Revert UI if stop command failed
                         }
                     })
                     .catch(error => {
-                        console.error('Error during stop fetch:', error);
-                        alert(`Error stopping ${serverName}: ${error.message}`);
-                        const statusSpan = document.getElementById(`status-${serverName}`);
-                        updateUI(serverName, statusSpan.textContent.toLowerCase() === 'running' ? 'running' : 'stopped', 'Error Stopping');
+                        console.error('Error during graceful stop fetch:', error);
+                        alert(`Error initiating stop: ${error.message}`);
+                        updateUI(serverName, 'running', 'Running');
+                    });
+            }
+
+            function handleForceStop(serverName) {
+                if (!confirm(`Are you sure you want to forcefully stop ${serverName}? This may cause data loss.`)) {
+                    return;
+                }
+                console.log(`Forcing stop for ${serverName}...`);
+                updateUI(serverName, 'stopping', 'Forcing Stop...');
+                fetch(`/force_stop/${serverName}`, { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            console.log(`${serverName} force stop requested.`);
+                            // UI will be fully updated by SSE
+                        } else {
+                            console.error(`Error force stopping ${serverName}:`, data.message);
+                            alert(`Error force stopping ${serverName}: ${data.message}`);
+                            updateUI(serverName, 'running', 'Error'); // Revert UI if it failed
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error during force stop fetch:', error);
+                        alert(`Error force stopping: ${error.message}`);
+                        updateUI(serverName, 'running', 'Error');
                     });
             }
 
@@ -1085,11 +1217,39 @@ HTML_TEMPLATE = """
                 const es = new EventSource(`/output/${serverName}`);
                 eventSources[serverName] = es;
 
+                let userHasScrolled = false;
+
+                outputArea.addEventListener('scroll', () => {
+                   // If user scrolls up, disable auto-scrolling and show the button
+                   const isAtBottom = outputArea.scrollHeight - outputArea.clientHeight <= outputArea.scrollTop + 1;
+                   const scrollToBottomButton = document.getElementById(`scroll-${serverName}`);
+                   
+                   if (!isAtBottom) {
+                       userHasScrolled = true;
+                       scrollToBottomButton.style.display = 'block';
+                   } else {
+                       // If user scrolls back to the bottom, re-enable auto-scrolling
+                       userHasScrolled = false;
+                       scrollToBottomButton.style.display = 'none';
+                   }
+                });
+
                 es.addEventListener('message', event => {
                     const line = document.createElement('p');
                     line.textContent = event.data;
                     outputArea.appendChild(line);
-                    outputArea.scrollTop = outputArea.scrollHeight; // Auto-scroll
+
+                    // Auto-scroll if the user hasn't manually scrolled up
+                    if (!userHasScrolled) {
+                        outputArea.scrollTop = outputArea.scrollHeight;
+                    }
+                });
+
+                const scrollToBottomButton = document.getElementById(`scroll-${serverName}`);
+                scrollToBottomButton.addEventListener('click', () => {
+                    userHasScrolled = false; // Re-enable auto-scrolling
+                    outputArea.scrollTop = outputArea.scrollHeight;
+                    scrollToBottomButton.style.display = 'none';
                 });
 
                 es.addEventListener('status', event => {
@@ -1130,6 +1290,7 @@ HTML_TEMPLATE = """
 
                 const startButton = item.querySelector('.start-button');
                 const stopButton = item.querySelector('.stop-button');
+                const forceStopButton = item.querySelector('.force-stop-button');
                 const statusSpan = item.querySelector('.status');
                 const outputArea = item.querySelector('.output-area');
                 const commandSection = item.querySelector('.command-section');
@@ -1144,6 +1305,7 @@ HTML_TEMPLATE = """
                     case 'running':
                         startButton.disabled = true;
                         stopButton.disabled = false;
+                        if (forceStopButton) forceStopButton.style.display = 'none';
                         outputArea.style.display = 'block';
                         if(commandSection) commandSection.style.display = 'flex';
                         if(commandButton) commandButton.disabled = false;
@@ -1153,6 +1315,7 @@ HTML_TEMPLATE = """
                     case 'stopped':
                         startButton.disabled = false;
                         stopButton.disabled = true;
+                        if (forceStopButton) forceStopButton.style.display = 'none';
                         if(commandSection) commandSection.style.display = 'none';
                         if(commandButton) commandButton.disabled = true;
                         if(commandInput) commandInput.disabled = true;
