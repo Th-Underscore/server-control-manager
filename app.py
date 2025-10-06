@@ -1014,7 +1014,7 @@ HTML_TEMPLATE = """
                     <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
                         <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
                         <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
-                        <button class="command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Send</button>
+                        <button class="command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
                     </div>
                     <div class="output-container">
                         <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
@@ -1058,6 +1058,16 @@ HTML_TEMPLATE = """
                 }
 
 
+                if (commandInput) {
+                    commandInput.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            handleSendCommand(serverName);
+                        }
+                    });
+                }
+ 
+ 
                 // --- Initial State ---
                 if (statusSpan.textContent === 'Running') {
                     startListening(serverName);
