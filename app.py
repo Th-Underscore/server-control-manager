@@ -139,24 +139,18 @@ def read_process_output(server_name, process):
         for line in iter(process.stdout.readline, b''):
             decoded_line = line.decode(errors='replace').strip()
             with process_info['lock']:
-                if not process_info['stop_requested']:
-                    process_info['output'].append(decoded_line)
-                    # Trim the output list to save memory
-                    if len(process_info['output']) > MAX_LOG_LINES:
-                        process_info['output'].pop(0)
-                else:
-                    break # Exit if stop was requested
+                process_info['output'].append(decoded_line)
+                # Trim the output list to save memory
+                if len(process_info['output']) > MAX_LOG_LINES:
+                    process_info['output'].pop(0)
             # time.sleep(0.01) # Optional sleep
 
         for line in iter(process.stderr.readline, b''):
              decoded_line = f"ERROR: {line.decode(errors='replace').strip()}"
              with process_info['lock']:
-                 if not process_info['stop_requested']:
-                     process_info['output'].append(decoded_line)
-                     if len(process_info['output']) > MAX_LOG_LINES:
-                        process_info['output'].pop(0)
-                 else:
-                     break
+                 process_info['output'].append(decoded_line)
+                 if len(process_info['output']) > MAX_LOG_LINES:
+                    process_info['output'].pop(0)
              # time.sleep(0.01)
 
     except Exception as e:
@@ -462,20 +456,21 @@ def stop_server(server_name):
         if process_info.get('stop_requested'):
             return jsonify({"status": "info", "message": "Stop already in progress."}), 202
 
-        try:
-            print(f"Attempting graceful stop for {server_name} (PID: {process.pid})...")
-            process_info['output'].append("--- GRACEFUL STOP REQUESTED ---")
-            process_info['output'].append(">>> Sending 'stop' command...")
-            
-            # Send 'stop' command
-            process.stdin.write(b'stop\n')
-            process.stdin.flush()
-            
-            process_info['stop_requested'] = True
+        print(f"Attempting graceful stop for {server_name} (PID: {process.pid})...")
+        process_info['output'].append("--- GRACEFUL STOP REQUESTED ---")
+        process_info['output'].append(">>> Sending 'stop' command...")
+        process_info['stop_requested'] = True
 
-            # Start a timer to force stop after a delay
+    # Release the lock before writing to stdin to prevent deadlock with the output reader thread
+    time.sleep(0.05)
+    
+    try:
+        process.stdin.write(b'stop\n')
+        process.stdin.flush()
+
+        with process_info['lock']:
             def force_stop_after_delay():
-                time.sleep(60) # 60-second timeout
+                time.sleep(60)
                 if server_name in running_processes:
                     proc_info_timer = running_processes[server_name]
                     with proc_info_timer['lock']:
@@ -489,12 +484,13 @@ def stop_server(server_name):
             timer_thread.start()
             process_info['graceful_stop_timer'] = timer_thread
 
-            return jsonify({"status": "success", "message": "Graceful stop initiated. Server will be force-stopped in 60 seconds if it doesn't exit."})
+        return jsonify({"status": "success", "message": "Graceful stop initiated. Server will be force-stopped in 60 seconds if it doesn't exit."})
 
-        except Exception as e:
-            print(f"Error initiating graceful stop for {server_name}: {e}")
+    except Exception as e:
+        print(f"Error initiating graceful stop for {server_name}: {e}")
+        with process_info['lock']:
             process_info['output'].append(f"--- ERROR INITIATING GRACEFUL STOP: {e} ---")
-            return jsonify({"status": "error", "message": f"Error initiating graceful stop: {e}"}), 500
+        return jsonify({"status": "error", "message": f"Error initiating graceful stop: {e}"}), 500
 
 def _force_kill_process(server_name, process_info):
     """Internal helper to forcefully terminate a process. Assumes lock is held."""
@@ -575,6 +571,7 @@ def stream_output(server_name):
         last_index = 0
         process_info = running_processes[server_name]
 
+        last_sent_time = time.time()
         while True:
             with process_info['lock']:
                 current_len = len(process_info['output'])
@@ -584,16 +581,21 @@ def stream_output(server_name):
                 process_running = process_obj is not None and process_obj.poll() is None
                 stop_req = process_info.get('stop_requested', False)
 
-            for line in new_lines:
-                yield f"event: message\ndata: {line}\n\n"
-            last_index = current_len
+            if new_lines:
+                for line in new_lines:
+                    yield f"event: message\ndata: {line}\n\n"
+                last_index = current_len
+                last_sent_time = time.time()
+            elif time.time() - last_sent_time > 10:
+                yield ":heartbeat\n\n"
+                last_sent_time = time.time()
 
             # Send final status and close
             if not process_running:
-                 status_message = "Stopped" if stop_req else "Finished"
-                 yield f"event: status\ndata: {status_message}\n\n"
-                 yield "event: close\ndata: Stream closing\n\n"
-                 break # Stop streaming
+                status_message = "Stopped" if stop_req else "Finished"
+                yield f"event: status\ndata: {status_message}\n\n"
+                yield "event: close\ndata: Stream closing\n\n"
+                break # Stop streaming
 
             time.sleep(0.5) # Adjust polling frequency as needed
 
@@ -641,7 +643,6 @@ def send_command(server_name):
         return jsonify({"status": "success", "message": "Command sent."})
     except Exception as e:
         print(f"Error sending command to {server_name}: {e}")
-        # Also log this error to the server's output display
         with process_info['lock']:
             process_info['output'].append(f"--- ERROR SENDING COMMAND: {e} ---")
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
@@ -1191,8 +1192,7 @@ HTML_TEMPLATE = """
                 .then(data => {
                     if (data.status === 'success') {
                         console.log(`Command sent to ${serverName} successfully.`);
-                        commandInput.value = ''; // Clear command input on success
-                        // Optionally clear password or keep it based on preference
+                        // commandInput.value = ''; // Clear command input on success
                         // commandPasswordInput.value = '';
                     } else {
                         console.error(`Error sending command to ${serverName}:`, data.message);
