@@ -33,6 +33,7 @@ SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", _generated_secret_key_default)
 # SSL Certificate (Optional - uncomment app.run line below to enable)
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"    # "C:\\Users\\Me\\server.key"
+USE_SSL = False
 MAX_LOG_LINES = 1000                                       # Max console lines to keep in memory
 # ---------------------
 
@@ -1528,8 +1529,10 @@ if __name__ == '__main__':
         # use_reloader=False is important for custom signal handling to work reliably,
         # especially on Windows, as the reloader runs the app in a child process.
         
-        #app.run(host=HOST, port=PORT, debug=False, threaded=True, ssl_context=ssl_context, use_reloader=False)
-        app.run(host=HOST, port=PORT, debug=False, threaded=True, use_reloader=False)
+        if USE_SSL:
+            app.run(host=HOST, port=PORT, debug=False, threaded=True, ssl_context=ssl_context, use_reloader=False)
+        else:
+            app.run(host=HOST, port=PORT, debug=False, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt caught in main __name__ block. Ensuring cleanup...")
         cleanup_processes() # Ensure cleanup is attempted
