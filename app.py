@@ -7,7 +7,19 @@ import secrets
 import signal
 import sys
 from dotenv import load_dotenv
-from flask import Flask, render_template_string, request, Response, jsonify, stream_with_context, redirect, url_for, flash, abort, send_from_directory
+from flask import (
+    Flask,
+    render_template_string,
+    request,
+    Response,
+    jsonify,
+    stream_with_context,
+    redirect,
+    url_for,
+    flash,
+    abort,
+    send_from_directory,
+)
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -18,13 +30,13 @@ from datetime import datetime
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
 
-SERVERS_BASE_DIR = r"C:\\path\\to\\servers"              # !!! IMPORTANT: SET THIS PATH !!!
-BATCH_FILE_NAME = "starter.bat"                          # Name of the batch file in each server folder
-BACKUPS_DIR = "Backups"                                  # Name of the backup directory (relative to SERVERS_BASE_DIR)
-HOST = "0.0.0.0"                                         # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
-PORT = 25564                                             # Port for the web server
-USERNAME = "admin"                                       # Global username for login
-PASSWORD = os.getenv("PASSWORD", "password")             # !!! CHANGE THIS PASSWORD !!!
+SERVERS_BASE_DIR = r"C:\\path\\to\\servers"  # !!! IMPORTANT: SET THIS PATH !!!
+BATCH_FILE_NAME = "starter.bat"  # Name of the batch file in each server folder
+BACKUPS_DIR = "Backups"  # Name of the backup directory (relative to SERVERS_BASE_DIR)
+HOST = "0.0.0.0"  # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
+PORT = 25564  # Port for the web server
+USERNAME = "admin"  # Global username for login
+PASSWORD = os.getenv("PASSWORD", "password")  # !!! CHANGE THIS PASSWORD !!!
 COMMAND_PASSWORD = os.getenv("CMD_PASSWORD", "cmdpass")  # !!! CHANGE THIS COMMAND PASSWORD !!!
 # Generate a strong secret key. Keep this key secret and consistent across restarts.
 # For production, set this via environment variable or config file.
@@ -32,30 +44,31 @@ _generated_secret_key_default = secrets.token_hex(24)
 SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", _generated_secret_key_default)
 # SSL Certificate (Optional - uncomment app.run line below to enable)
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
-SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"    # "C:\\Users\\Me\\server.key"
+SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"  # "C:\\Users\\Me\\server.key"
 USE_SSL = False
-MAX_LOG_LINES = 1000                                       # Max console lines to keep in memory
+MAX_LOG_LINES = 1000  # Max console lines to keep in memory
 # ---------------------
 
 # --- Global flag to indicate shutdown ---
 shutting_down = False
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = SECRET_KEY
+app.config["SECRET_KEY"] = SECRET_KEY
 
 # --- Rate Limiting Setup ---
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"], # General limits
-    storage_uri="memory://", # Memory storage for simplicity
+    default_limits=["200 per day", "50 per hour"],  # General limits
+    storage_uri="memory://",  # Memory storage for simplicity
 )
 
 # --- Login Manager Setup ---
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'login' # Route name for the login page
-login_manager.login_message_category = 'info' # Flash message category
+login_manager.login_view = "login"  # Route name for the login page
+login_manager.login_message_category = "info"  # Flash message category
+
 
 # --- User Model ---
 # Simple User class for Flask-Login. For multiple users, you'd typically use a database.
@@ -68,17 +81,16 @@ class User(UserMixin):
     @staticmethod
     def get(user_id):
         # In this simple case, we only have one user (id=1)
-        if user_id == '1':
-             # IMPORTANT: Store the HASH of the password, not the plain password
+        if user_id == "1":
+            # IMPORTANT: Store the HASH of the password, not the plain password
             hashed_password = users_storage.get(USERNAME)
             if hashed_password:
-                return User(id='1', username=USERNAME, password_hash=hashed_password)
+                return User(id="1", username=USERNAME, password_hash=hashed_password)
         return None
 
+
 # Store user credentials securely (using password hashes)
-users_storage = {
-    USERNAME: generate_password_hash(PASSWORD)
-}
+users_storage = {USERNAME: generate_password_hash(PASSWORD)}
 # Store command password hash
 COMMAND_PASSWORD_HASH = generate_password_hash(COMMAND_PASSWORD)
 
@@ -88,22 +100,26 @@ def load_user(user_id):
     """Flask-Login callback to load a user from the 'database'."""
     return User.get(user_id)
 
+
 # --- Process Management ---
 # In-memory storage for running processes and their output
-running_processes = {} # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False, 'graceful_stop_timer': None} }
- 
+running_processes = (
+    {}
+)  # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False, 'graceful_stop_timer': None} }
+
+
 def get_server_properties(server_path):
     """Parses server.properties file and returns a dictionary of key-value pairs."""
     properties = {}
-    properties_file = os.path.join(server_path, 'server.properties')
+    properties_file = os.path.join(server_path, "server.properties")
     if os.path.isfile(properties_file):
         try:
-            with open(properties_file, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(properties_file, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#'):
-                        if '=' in line:
-                            key, value = line.split('=', 1)
+                    if line and not line.startswith("#"):
+                        if "=" in line:
+                            key, value = line.split("=", 1)
                             properties[key.strip()] = value.strip()
         except Exception as e:
             print(f"Error reading server.properties for {os.path.basename(server_path)}: {e}")
@@ -127,51 +143,55 @@ def get_server_folders():
         print(f"Error reading directory {SERVERS_BASE_DIR}: {e}")
     return sorted(servers)
 
+
 def read_process_output(server_name, process):
     """Reads stdout/stderr from a process and stores it."""
     global running_processes
-    if server_name not in running_processes: return # Safety check
+    if server_name not in running_processes:
+        return  # Safety check
 
     process_info = running_processes[server_name]
 
     try:
         # Read stdout line by line
-        for line in iter(process.stdout.readline, b''):
-            decoded_line = line.decode(errors='replace').strip()
-            with process_info['lock']:
-                process_info['output'].append(decoded_line)
+        for line in iter(process.stdout.readline, b""):
+            decoded_line = line.decode(errors="replace").strip()
+            with process_info["lock"]:
+                process_info["output"].append(decoded_line)
                 # Trim the output list to save memory
-                if len(process_info['output']) > MAX_LOG_LINES:
-                    process_info['output'].pop(0)
+                if len(process_info["output"]) > MAX_LOG_LINES:
+                    process_info["output"].pop(0)
             # time.sleep(0.01) # Optional sleep
 
-        for line in iter(process.stderr.readline, b''):
-             decoded_line = f"ERROR: {line.decode(errors='replace').strip()}"
-             with process_info['lock']:
-                 process_info['output'].append(decoded_line)
-                 if len(process_info['output']) > MAX_LOG_LINES:
-                    process_info['output'].pop(0)
-             # time.sleep(0.01)
+        for line in iter(process.stderr.readline, b""):
+            decoded_line = f"ERROR: {line.decode(errors='replace').strip()}"
+            with process_info["lock"]:
+                process_info["output"].append(decoded_line)
+                if len(process_info["output"]) > MAX_LOG_LINES:
+                    process_info["output"].pop(0)
+            # time.sleep(0.01)
 
     except Exception as e:
         print(f"Error reading output for {server_name}: {e}")
-        with process_info['lock']:
-             # Check if still exists before appending
-             if server_name in running_processes:
-                 running_processes[server_name]['output'].append(f"--- Error reading output: {e} ---")
+        with process_info["lock"]:
+            # Check if still exists before appending
+            if server_name in running_processes:
+                running_processes[server_name]["output"].append(f"--- Error reading output: {e} ---")
     finally:
         if process:
-            if process.stdout: process.stdout.close()
-            if process.stderr: process.stderr.close()
+            if process.stdout:
+                process.stdout.close()
+            if process.stderr:
+                process.stderr.close()
             process.wait()
 
         print(f"Output reading thread finished for {server_name}")
         # Safely update status if the process entry still exists
         if server_name in running_processes:
-            with running_processes[server_name]['lock']:
-                if not running_processes[server_name]['stop_requested']:
-                    running_processes[server_name]['output'].append("--- SCRIPT FINISHED ---")
-                    
+            with running_processes[server_name]["lock"]:
+                if not running_processes[server_name]["stop_requested"]:
+                    running_processes[server_name]["output"].append("--- SCRIPT FINISHED ---")
+
                     # --- Backup Copy ---
                     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
                     try:
@@ -181,7 +201,8 @@ def read_process_output(server_name, process):
                     # --------------------
 
                     print(f"Process for {server_name} exited.")
-                    running_processes[server_name]['process'] = None
+                    running_processes[server_name]["process"] = None
+
 
 # --- Backup Helper ---
 def _log_to_server_output(server_name, message):
@@ -190,9 +211,9 @@ def _log_to_server_output(server_name, message):
     global running_processes
     if server_name in running_processes:
         process_info = running_processes[server_name]
-        with process_info.get('lock', threading.Lock()): # Use existing lock or a temp one if somehow missing
-            if 'output' in process_info:
-                 process_info['output'].append(message)
+        with process_info.get("lock", threading.Lock()):  # Use existing lock or a temp one if somehow missing
+            if "output" in process_info:
+                process_info["output"].append(message)
             else:
                 print(f"Warning: 'output' list not found for server {server_name} during backup logging.")
     else:
@@ -204,7 +225,7 @@ def find_latest_backup_folder(backup_dir):
     if not os.path.isdir(backup_dir):
         return None
     try:
-        items = [item for item in os.listdir(backup_dir) if not item.endswith('.json')]
+        items = [item for item in os.listdir(backup_dir) if not item.endswith(".json")]
         if not items:
             return None
         # Sort items alphabetically/numerically - assumes naming convention allows this
@@ -216,10 +237,11 @@ def find_latest_backup_folder(backup_dir):
         print(f"Error listing backup items in {backup_dir}: {e}")
         return None
 
+
 def copy_latest_backup(server_name, server_path):
     """Copies the latest backup file or folder to the shared Backups directory."""
     _log_to_server_output(server_name, "--- BACKUP START ---")
-    source_backups_dir = os.path.join(server_path, 'backups')
+    source_backups_dir = os.path.join(server_path, "backups")
     # SERVERS_BASE_DIR/BACKUPS_DIR
     target_parent_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, BACKUPS_DIR))
 
@@ -253,7 +275,7 @@ def copy_latest_backup(server_name, server_path):
             if is_source_dir:
                 shutil.copytree(source_path, dest_path)
             else:
-                shutil.copy2(source_path, dest_path) # copy2 preserves metadata
+                shutil.copy2(source_path, dest_path)  # copy2 preserves metadata
 
             success_message = f"Successfully copied backup '{dest_item_name}' to shared Backups."
             print(success_message)
@@ -279,48 +301,51 @@ def copy_latest_backup(server_name, server_path):
         _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
         return "No backups found to copy"
 
+
 # --- Routes ---
-@app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute") # Apply rate limit specifically to login attempts
+@app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute")  # Apply rate limit specifically to login attempts
 def login():
     """Handles user login."""
     if current_user.is_authenticated:
-        return redirect(url_for('index'))
+        return redirect(url_for("index"))
 
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        remember = True if request.form.get('remember') else False
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        remember = True if request.form.get("remember") else False
 
         stored_password_hash = users_storage.get(username)
         user_obj = None
         if stored_password_hash:
-             # Only create User object if username exists to check password
-             temp_user = User(id='1', username=username, password_hash=stored_password_hash) # ID '1' is placeholder
-             if check_password_hash(temp_user.password_hash, password):
-                  user_obj = temp_user # Valid credentials
+            # Only create User object if username exists to check password
+            temp_user = User(id="1", username=username, password_hash=stored_password_hash)  # ID '1' is placeholder
+            if check_password_hash(temp_user.password_hash, password):
+                user_obj = temp_user  # Valid credentials
 
         if user_obj:
             login_user(user_obj, remember=remember)
-            flash('Logged in successfully.', 'success')
+            flash("Logged in successfully.", "success")
             # Redirect
-            next_page = request.args.get('next')
-            return redirect(next_page or url_for('index'))
+            next_page = request.args.get("next")
+            return redirect(next_page or url_for("index"))
         else:
-            flash('Invalid username or password.', 'danger')
+            flash("Invalid username or password.", "danger")
 
     # Render login form for GET request or failed POST
     return render_template_string(LOGIN_TEMPLATE)
 
-@app.route('/logout')
+
+@app.route("/logout")
 @login_required
 def logout():
     """Handles user logout."""
     logout_user()
-    flash('You have been logged out.', 'info')
-    return redirect(url_for('login'))
+    flash("You have been logged out.", "info")
+    return redirect(url_for("login"))
 
-@app.route('/')
+
+@app.route("/")
 @login_required
 def index():
     """Serves the main control panel page."""
@@ -330,16 +355,26 @@ def index():
         server_path = os.path.join(SERVERS_BASE_DIR, server_name)
         properties = get_server_properties(server_path)
         server_details[server_name] = {
-            'motd': properties.get('motd', 'No MOTD found'),
-            'version': properties.get('version', '') # Assuming 'version' might be in server.properties
+            "motd": properties.get("motd", "No MOTD found"),
+            "version": properties.get("version", ""),  # Assuming 'version' might be in server.properties
         }
 
     # Pass server status (running or not) to the template
-    server_status = {name: (proc_info['process'] is not None and proc_info['process'].poll() is None)
-                     for name, proc_info in running_processes.items() if proc_info and 'process' in proc_info}
-    return render_template_string(HTML_TEMPLATE, servers=servers, server_status=server_status, server_details=server_details, username=current_user.username)
+    server_status = {
+        name: (proc_info["process"] is not None and proc_info["process"].poll() is None)
+        for name, proc_info in running_processes.items()
+        if proc_info and "process" in proc_info
+    }
+    return render_template_string(
+        HTML_TEMPLATE,
+        servers=servers,
+        server_status=server_status,
+        server_details=server_details,
+        username=current_user.username,
+    )
 
-@app.route('/start/<server_name>', methods=['GET', 'POST']) # <--- Allow both GET and POST
+
+@app.route("/start/<server_name>", methods=["GET", "POST"])  # <--- Allow both GET and POST
 @login_required
 def start_server(server_name):
     """
@@ -347,42 +382,42 @@ def start_server(server_name):
     Handles both POST (from UI button) and GET (direct URL access).
     """
     global running_processes
-    servers = get_server_folders() # Re-check available servers
+    servers = get_server_folders()  # Re-check available servers
 
     # --- Validation (Common for GET and POST) ---
     if server_name not in servers:
-        if request.method == 'POST':
+        if request.method == "POST":
             # Abort for POST is fine, leads to JS error handling
             abort(404, "Invalid server name.")
-        else: # request.method == 'GET'
+        else:  # request.method == 'GET'
             # For GET, flash a message and redirect
             flash(f"Error: Invalid server name '{server_name}'.", "danger")
-            return redirect(url_for('index'))
+            return redirect(url_for("index"))
 
     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
     batch_path = os.path.join(server_path, BATCH_FILE_NAME)
 
     if not os.path.isfile(batch_path):
-        if request.method == 'POST':
-             abort(404, f"{BATCH_FILE_NAME} not found in {server_name}.")
+        if request.method == "POST":
+            abort(404, f"{BATCH_FILE_NAME} not found in {server_name}.")
         else:
             flash(f"Error: {BATCH_FILE_NAME} not found for server '{server_name}'.", "danger")
-            return redirect(url_for('index'))
+            return redirect(url_for("index"))
 
     # --- Check if already running (Common for GET and POST, needs thread safety) ---
     # Use a temporary lock if the server entry doesn't exist yet to avoid race conditions on first start
     # This lock is just for the check, the actual process info will have its own lock later
-    check_lock = running_processes.get(server_name, {}).get('lock', threading.Lock())
+    check_lock = running_processes.get(server_name, {}).get("lock", threading.Lock())
 
     with check_lock:
         process_info = running_processes.get(server_name)
-        if process_info and process_info.get('process') and process_info['process'].poll() is None:
+        if process_info and process_info.get("process") and process_info["process"].poll() is None:
             # Server is already running
-            if request.method == 'POST':
+            if request.method == "POST":
                 return jsonify({"status": "error", "message": f"{server_name} is already running."}), 400
             else:
                 flash(f"Info: Server '{server_name}' is already running.", "info")
-                return redirect(url_for('index'))
+                return redirect(url_for("index"))
 
     # --- Start the process (Common logic) ---
     try:
@@ -392,18 +427,18 @@ def start_server(server_name):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=server_path,
-            shell=False, # Important for security and avoiding shell injection
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP # Windows specific for reliable termination
+            shell=False,  # Important for security and avoiding shell injection
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,  # Windows specific for reliable termination
         )
 
         # Store process info and start output reading thread
         # Create the lock *before* adding the entry to avoid race conditions
         new_lock = threading.RLock()
         running_processes[server_name] = {
-            'process': process,
-            'output': [f"--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
-            'lock': new_lock,
-            'stop_requested': False
+            "process": process,
+            "output": [f"--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
+            "lock": new_lock,
+            "stop_requested": False,
         }
         thread = threading.Thread(target=read_process_output, args=(server_name, process), daemon=True)
         thread.start()
@@ -411,105 +446,116 @@ def start_server(server_name):
         print(f"Started process for {server_name} with PID: {process.pid}")
 
         # --- Response Generation (Different for GET and POST) ---
-        if request.method == 'POST':
+        if request.method == "POST":
             return jsonify({"status": "success", "message": f"Started {server_name}."})
         else:
             flash(f"Success: Started server '{server_name}'.", "success")
-            return redirect(url_for('index'))
+            return redirect(url_for("index"))
 
     except Exception as e:
         print(f"Error starting {server_name}: {e}")
         # Attempt to clean up if process partially started but failed later
         # Need to handle potential race condition if entry was just added
-        error_lock = running_processes.get(server_name, {}).get('lock')
+        error_lock = running_processes.get(server_name, {}).get("lock")
         if error_lock:
-             with error_lock:
-                  if server_name in running_processes: # Check again inside lock
-                       del running_processes[server_name]
+            with error_lock:
+                if server_name in running_processes:  # Check again inside lock
+                    del running_processes[server_name]
         else:
-             if server_name in running_processes:
-                  del running_processes[server_name]
+            if server_name in running_processes:
+                del running_processes[server_name]
 
-
-        if request.method == 'POST':
+        if request.method == "POST":
             return jsonify({"status": "error", "message": f"Failed to start {server_name}: {e}"}), 500
         else:
             flash(f"Error: Failed to start server '{server_name}': {e}", "danger")
-            return redirect(url_for('index')) # Redirect back to the main page
+            return redirect(url_for("index"))  # Redirect back to the main page
 
-@app.route('/stop/<server_name>', methods=['POST'])
+
+@app.route("/stop/<server_name>", methods=["POST"])
 @login_required
 def stop_server(server_name):
     """Initiates a graceful stop for the specified server."""
     global running_processes
 
-    if server_name not in running_processes or not running_processes[server_name].get('process'):
+    if server_name not in running_processes or not running_processes[server_name].get("process"):
         return jsonify({"status": "error", "message": f"{server_name} is not running or already stopped."}), 404
 
     process_info = running_processes[server_name]
-    process = process_info['process']
+    process = process_info["process"]
 
-    with process_info['lock']:
+    with process_info["lock"]:
         if process.poll() is not None:
             return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
-        
-        if process_info.get('stop_requested'):
+
+        if process_info.get("stop_requested"):
             return jsonify({"status": "info", "message": "Stop already in progress."}), 202
 
         print(f"Attempting graceful stop for {server_name} (PID: {process.pid})...")
-        process_info['output'].append("--- GRACEFUL STOP REQUESTED ---")
-        process_info['output'].append(">>> Sending 'stop' command...")
-        process_info['stop_requested'] = True
+        process_info["output"].append("--- GRACEFUL STOP REQUESTED ---")
+        process_info["output"].append(">>> Sending 'stop' command...")
+        process_info["stop_requested"] = True
 
     # Release the lock before writing to stdin to prevent deadlock with the output reader thread
     time.sleep(0.05)
-    
+
     try:
-        process.stdin.write(b'stop\n')
+        process.stdin.write(b"stop\n")
         process.stdin.flush()
 
-        with process_info['lock']:
+        with process_info["lock"]:
+
             def force_stop_after_delay():
                 time.sleep(60)
                 if server_name in running_processes:
                     proc_info_timer = running_processes[server_name]
-                    with proc_info_timer['lock']:
+                    with proc_info_timer["lock"]:
                         # Check if the process is still running and a stop was requested
-                        if proc_info_timer.get('process') and proc_info_timer['process'].poll() is None and proc_info_timer.get('stop_requested'):
+                        if (
+                            proc_info_timer.get("process")
+                            and proc_info_timer["process"].poll() is None
+                            and proc_info_timer.get("stop_requested")
+                        ):
                             print(f"Graceful stop for {server_name} timed out. Forcing termination.")
-                            proc_info_timer['output'].append("--- GRACEFUL STOP TIMEOUT: FORCING STOP ---")
+                            proc_info_timer["output"].append("--- GRACEFUL STOP TIMEOUT: FORCING STOP ---")
                             _force_kill_process(server_name, proc_info_timer)
 
             timer_thread = threading.Thread(target=force_stop_after_delay, daemon=True)
             timer_thread.start()
-            process_info['graceful_stop_timer'] = timer_thread
+            process_info["graceful_stop_timer"] = timer_thread
 
-        return jsonify({"status": "success", "message": "Graceful stop initiated. Server will be force-stopped in 60 seconds if it doesn't exit."})
+        return jsonify(
+            {
+                "status": "success",
+                "message": "Graceful stop initiated. Server will be force-stopped in 60 seconds if it doesn't exit.",
+            }
+        )
 
     except Exception as e:
         print(f"Error initiating graceful stop for {server_name}: {e}")
-        with process_info['lock']:
-            process_info['output'].append(f"--- ERROR INITIATING GRACEFUL STOP: {e} ---")
+        with process_info["lock"]:
+            process_info["output"].append(f"--- ERROR INITIATING GRACEFUL STOP: {e} ---")
         return jsonify({"status": "error", "message": f"Error initiating graceful stop: {e}"}), 500
+
 
 def _force_kill_process(server_name, process_info):
     """Internal helper to forcefully terminate a process. Assumes lock is held."""
-    process = process_info.get('process')
+    process = process_info.get("process")
     if not process or process.poll() is not None:
         return "already stopped"
 
     print(f"Force killing process for {server_name} (PID: {process.pid})...")
     try:
-        subprocess.call(['taskkill', '/F', '/T', '/PID', str(process.pid)])
-        time.sleep(1) # Give it a moment
+        subprocess.call(["taskkill", "/F", "/T", "/PID", str(process.pid)])
+        time.sleep(1)  # Give it a moment
         if process.poll() is None:
             process.kill()
             process.wait(timeout=5)
-        
+
         final_status = "stopped" if process.poll() is not None else "failed to stop"
-        process_info['output'].append(f"--- SCRIPT FORCE {final_status.upper()} ---")
-        process_info['process'] = None
-        
+        process_info["output"].append(f"--- SCRIPT FORCE {final_status.upper()} ---")
+        process_info["process"] = None
+
         # Trigger backup on successful forced stop
         if final_status == "stopped":
             server_path = os.path.join(SERVERS_BASE_DIR, server_name)
@@ -517,37 +563,38 @@ def _force_kill_process(server_name, process_info):
                 copy_latest_backup(server_name, server_path)
             except Exception as backup_e:
                 print(f"Critical error calling backup function for {server_name} after force kill: {backup_e}")
-        
+
         return final_status
     except Exception as e:
         print(f"Error during force kill for {server_name}: {e}")
-        process_info['output'].append(f"--- ERROR DURING FORCE KILL: {e} ---")
+        process_info["output"].append(f"--- ERROR DURING FORCE KILL: {e} ---")
         return "error"
 
-@app.route('/force_stop/<server_name>', methods=['POST'])
+
+@app.route("/force_stop/<server_name>", methods=["POST"])
 @login_required
 def force_stop_server(server_name):
     """Forcefully stops the running server process."""
     global running_processes
 
-    if server_name not in running_processes or not running_processes[server_name].get('process'):
+    if server_name not in running_processes or not running_processes[server_name].get("process"):
         return jsonify({"status": "error", "message": f"{server_name} is not running or already stopped."}), 404
 
     process_info = running_processes[server_name]
-    with process_info['lock']:
-        if process_info['process'].poll() is not None:
+    with process_info["lock"]:
+        if process_info["process"].poll() is not None:
             return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
-        
-        process_info['output'].append("--- MANUAL FORCE STOP REQUESTED ---")
+
+        process_info["output"].append("--- MANUAL FORCE STOP REQUESTED ---")
         final_status = _force_kill_process(server_name, process_info)
-        
+
         if final_status != "error":
             return jsonify({"status": "success", "message": f"{server_name} forcefully {final_status}."})
         else:
             return jsonify({"status": "error", "message": f"An error occurred while trying to force stop {server_name}."}), 500
 
 
-@app.route('/output/<server_name>')
+@app.route("/output/<server_name>")
 @login_required
 def stream_output(server_name):
     """Streams the output of a running/finished process using SSE."""
@@ -555,17 +602,19 @@ def stream_output(server_name):
         # Return an event indicating the server isn't running or hasn't been started
         def initial_event():
             yield "event: status\ndata: Not Found\n\n"
-            yield "event: close\ndata: Stream closing\n\n" # Signal client to close
-        return Response(initial_event(), mimetype='text/event-stream')
+            yield "event: close\ndata: Stream closing\n\n"  # Signal client to close
+
+        return Response(initial_event(), mimetype="text/event-stream")
 
     # Check if process info exists before proceeding
     process_info = running_processes.get(server_name)
     if not process_info:
-         def not_found_event():
+
+        def not_found_event():
             yield "event: status\ndata: Not Found\n\n"
             yield "event: close\ndata: Stream closing\n\n"
-         return Response(not_found_event(), mimetype='text/event-stream')
 
+        return Response(not_found_event(), mimetype="text/event-stream")
 
     def generate_output():
         last_index = 0
@@ -573,13 +622,13 @@ def stream_output(server_name):
 
         last_sent_time = time.time()
         while True:
-            with process_info['lock']:
-                current_len = len(process_info['output'])
-                new_lines = process_info['output'][last_index:current_len]
+            with process_info["lock"]:
+                current_len = len(process_info["output"])
+                new_lines = process_info["output"][last_index:current_len]
                 # Check process status *inside* the lock to ensure consistency with output read
-                process_obj = process_info.get('process')
+                process_obj = process_info.get("process")
                 process_running = process_obj is not None and process_obj.poll() is None
-                stop_req = process_info.get('stop_requested', False)
+                stop_req = process_info.get("stop_requested", False)
 
             if new_lines:
                 for line in new_lines:
@@ -595,13 +644,14 @@ def stream_output(server_name):
                 status_message = "Stopped" if stop_req else "Finished"
                 yield f"event: status\ndata: {status_message}\n\n"
                 yield "event: close\ndata: Stream closing\n\n"
-                break # Stop streaming
+                break  # Stop streaming
 
-            time.sleep(0.5) # Adjust polling frequency as needed
+            time.sleep(0.5)  # Adjust polling frequency as needed
 
-    return Response(stream_with_context(generate_output()), mimetype='text/event-stream')
+    return Response(stream_with_context(generate_output()), mimetype="text/event-stream")
 
-@app.route('/command/<server_name>', methods=['POST'])
+
+@app.route("/command/<server_name>", methods=["POST"])
 @login_required
 def send_command(server_name):
     """Sends a command to the stdin of a running server process."""
@@ -612,8 +662,8 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": "Invalid request format, JSON expected."}), 400
 
     data = request.get_json()
-    command_text = data.get('command')
-    provided_cmd_password = data.get('command_password')
+    command_text = data.get("command")
+    provided_cmd_password = data.get("command_password")
 
     if not command_text or not provided_cmd_password:
         return jsonify({"status": "error", "message": "Missing command or command password."}), 400
@@ -623,45 +673,47 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": "Invalid command password."}), 403
 
     process_info = running_processes.get(server_name)
-    if not process_info or not process_info.get('process') or process_info['process'].poll() is not None:
+    if not process_info or not process_info.get("process") or process_info["process"].poll() is not None:
         return jsonify({"status": "error", "message": f"{server_name} is not running or already stopped."}), 404
 
-    process = process_info['process']
+    process = process_info["process"]
 
     try:
         # Ensure command ends with a newline, as most console apps expect this
-        if not command_text.endswith('\n'):
-            command_text += '\n'
+        if not command_text.endswith("\n"):
+            command_text += "\n"
 
-        process.stdin.write(command_text.encode('utf-8'))
-        process.stdin.flush() # Ensure it's sent immediately
+        process.stdin.write(command_text.encode("utf-8"))
+        process.stdin.flush()  # Ensure it's sent immediately
 
         # Log the command to the server's output display as well
-        with process_info['lock']:
-            process_info['output'].append(f">>> CMD: {command_text.strip()}")
+        with process_info["lock"]:
+            process_info["output"].append(f">>> CMD: {command_text.strip()}")
 
         return jsonify({"status": "success", "message": "Command sent."})
     except Exception as e:
         print(f"Error sending command to {server_name}: {e}")
-        with process_info['lock']:
-            process_info['output'].append(f"--- ERROR SENDING COMMAND: {e} ---")
+        with process_info["lock"]:
+            process_info["output"].append(f"--- ERROR SENDING COMMAND: {e} ---")
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
-@app.route('/public/<server_name>/<path:filename>')
+
+@app.route("/public/<server_name>/<path:filename>")
 @login_required
 def public_files(server_name, filename):
-   """Serves files from the public directory of a server."""
-   servers = get_server_folders()
-   if server_name not in servers:
-       abort(404, "Server not found.")
+    """Serves files from the public directory of a server."""
+    servers = get_server_folders()
+    if server_name not in servers:
+        abort(404, "Server not found.")
 
-   server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-   public_dir = os.path.join(server_path, 'public')
+    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+    public_dir = os.path.join(server_path, "public")
 
-   if not os.path.isdir(public_dir):
-       abort(404, "Public directory not found for this server.")
+    if not os.path.isdir(public_dir):
+        abort(404, "Public directory not found for this server.")
 
-   return send_from_directory(public_dir, filename)
+    return send_from_directory(public_dir, filename)
+
 
 # --- Server-Specific Log Viewing ---
 LOGS_PER_PAGE = 15
@@ -820,113 +872,137 @@ SERVER_LOG_VIEW_TEMPLATE = """
 </html>
 """
 
-@app.route('/server/<server_name>/logs/', defaults={'page': 1}, endpoint='list_server_logs_default')
-@app.route('/server/<server_name>/logs/page/<int:page>', endpoint='list_server_logs_paginated')
+
+@app.route("/server/<server_name>/logs/", defaults={"page": 1}, endpoint="list_server_logs_default")
+@app.route("/server/<server_name>/logs/page/<int:page>", endpoint="list_server_logs_paginated")
 @login_required
 def list_server_logs(server_name, page):
     servers = get_server_folders()
     if server_name not in servers:
         flash(f"Server '{server_name}' not found.", "danger")
-        return redirect(url_for('index'))
+        return redirect(url_for("index"))
 
     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-    server_logs_path = os.path.join(server_path, 'logs')
+    server_logs_path = os.path.join(server_path, "logs")
 
     if not os.path.isdir(server_logs_path):
         flash(f"Logs directory not found for server '{server_name}' at {server_logs_path}", "warning")
-        return render_template_string(SERVER_LOGS_LIST_TEMPLATE, server_name=server_name, log_files=[],
-                                      current_page=1, total_pages=0, server_logs_path=server_logs_path, username=current_user.username)
+        return render_template_string(
+            SERVER_LOGS_LIST_TEMPLATE,
+            server_name=server_name,
+            log_files=[],
+            current_page=1,
+            total_pages=0,
+            server_logs_path=server_logs_path,
+            username=current_user.username,
+        )
 
     all_log_files_details = []
     try:
         for item_name in os.listdir(server_logs_path):
-            if item_name.endswith(('.log', '.log.gz')): # NOTE: Filter for log files
+            if item_name.endswith((".log", ".log.gz")):  # NOTE: Filter for log files
                 full_path = os.path.join(server_logs_path, item_name)
                 if os.path.isfile(full_path):
                     try:
                         stat_info = os.stat(full_path)
-                        all_log_files_details.append({
-                            'name': item_name,
-                            'modified_time_obj': datetime.fromtimestamp(stat_info.st_mtime), # For sorting
-                            'size': stat_info.st_size
-                        })
+                        all_log_files_details.append(
+                            {
+                                "name": item_name,
+                                "modified_time_obj": datetime.fromtimestamp(stat_info.st_mtime),  # For sorting
+                                "size": stat_info.st_size,
+                            }
+                        )
                     except OSError as e:
                         print(f"Could not stat file {full_path} for server {server_name}: {e}")
                         flash(f"Could not access metadata for {item_name} in {server_name}'s logs.", "warning")
-        
+
         # NOTE: Sort logs by modification time (datetime object), newest first.
-        all_log_files_details.sort(key=lambda x: x['modified_time_obj'], reverse=True)
-        
+        all_log_files_details.sort(key=lambda x: x["modified_time_obj"], reverse=True)
+
         # NOTE: Convert datetime to string for display after sorting
         for log_file in all_log_files_details:
-            log_file['modified_time'] = log_file['modified_time_obj'].strftime('%Y-%m-%d %H:%M:%S')
-            del log_file['modified_time_obj'] # Remove temporary sort key
+            log_file["modified_time"] = log_file["modified_time_obj"].strftime("%Y-%m-%d %H:%M:%S")
+            del log_file["modified_time_obj"]  # Remove temporary sort key
 
     except OSError as e:
         flash(f"Error reading logs directory for server '{server_name}': {e}", "danger")
         print(f"Error reading logs directory {server_logs_path}: {e}")
-        return render_template_string(SERVER_LOGS_LIST_TEMPLATE, server_name=server_name, log_files=[],
-                                      current_page=1, total_pages=0, server_logs_path=server_logs_path, username=current_user.username)
+        return render_template_string(
+            SERVER_LOGS_LIST_TEMPLATE,
+            server_name=server_name,
+            log_files=[],
+            current_page=1,
+            total_pages=0,
+            server_logs_path=server_logs_path,
+            username=current_user.username,
+        )
 
     total_files = len(all_log_files_details)
     total_pages = (total_files + LOGS_PER_PAGE - 1) // LOGS_PER_PAGE
     # NOTE: Ensure current_page is within valid bounds
     current_page = max(1, min(page, total_pages if total_pages > 0 else 1))
-    
+
     start_index = (current_page - 1) * LOGS_PER_PAGE
     end_index = start_index + LOGS_PER_PAGE
     paginated_log_files = all_log_files_details[start_index:end_index]
 
-    return render_template_string(SERVER_LOGS_LIST_TEMPLATE,
-                                  server_name=server_name,
-                                  log_files=paginated_log_files,
-                                  current_page=current_page,
-                                  total_pages=total_pages,
-                                  server_logs_path=server_logs_path, # Pass for display if no logs found
-                                  username=current_user.username)
+    return render_template_string(
+        SERVER_LOGS_LIST_TEMPLATE,
+        server_name=server_name,
+        log_files=paginated_log_files,
+        current_page=current_page,
+        total_pages=total_pages,
+        server_logs_path=server_logs_path,  # Pass for display if no logs found
+        username=current_user.username,
+    )
 
 
-@app.route('/server/<server_name>/logs/view/<path:log_filename>')
+@app.route("/server/<server_name>/logs/view/<path:log_filename>")
 @login_required
 def view_server_log_file(server_name, log_filename):
     servers = get_server_folders()
     if server_name not in servers:
         flash(f"Server '{server_name}' not found.", "danger")
-        return redirect(url_for('index'))
+        return redirect(url_for("index"))
 
     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-    server_logs_path = os.path.join(server_path, 'logs')
-    
+    server_logs_path = os.path.join(server_path, "logs")
+
     # NOTE: Security: Normalize paths and check if the requested file is within the server's log directory
     normalized_server_logs_path = os.path.abspath(server_logs_path)
     # NOTE: Ensure log_filename is treated as a relative path component and re-join with the normalized log path
     # This helps prevent issues if log_filename somehow contains '..'
     requested_log_file_path = os.path.abspath(os.path.join(normalized_server_logs_path, os.path.basename(log_filename)))
 
-
-    if not requested_log_file_path.startswith(normalized_server_logs_path) or \
-       not os.path.isfile(requested_log_file_path) or \
-       not (log_filename.endswith('.log') or log_filename.endswith('.log.gz')): # Ensure it's a log file
-        abort(404, f"Log file '{log_filename}' not found, is not a valid log file, or access denied for server '{server_name}'.")
+    if (
+        not requested_log_file_path.startswith(normalized_server_logs_path)
+        or not os.path.isfile(requested_log_file_path)
+        or not (log_filename.endswith(".log") or log_filename.endswith(".log.gz"))
+    ):  # Ensure it's a log file
+        abort(
+            404, f"Log file '{log_filename}' not found, is not a valid log file, or access denied for server '{server_name}'."
+        )
 
     content = ""
     try:
-        if log_filename.endswith('.gz'):
-            with gzip.open(requested_log_file_path, 'rt', encoding='utf-8', errors='replace') as f:
+        if log_filename.endswith(".gz"):
+            with gzip.open(requested_log_file_path, "rt", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         else:
-            with open(requested_log_file_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(requested_log_file_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
     except Exception as e:
         flash(f"Error reading log file '{log_filename}' for server '{server_name}': {e}", "danger")
         print(f"Error reading log file {requested_log_file_path}: {e}")
-        content = f"--- ERROR READING FILE ---\n{e}\nPath: {requested_log_file_path}" # Add path for debugging
-    
-    return render_template_string(SERVER_LOG_VIEW_TEMPLATE,
-                                  server_name=server_name,
-                                  log_filename=log_filename,
-                                  log_content=content,
-                                  username=current_user.username)
+        content = f"--- ERROR READING FILE ---\n{e}\nPath: {requested_log_file_path}"  # Add path for debugging
+
+    return render_template_string(
+        SERVER_LOG_VIEW_TEMPLATE,
+        server_name=server_name,
+        log_filename=log_filename,
+        log_content=content,
+        username=current_user.username,
+    )
 
 
 # --- HTML Templates ---
@@ -1419,60 +1495,70 @@ def cleanup_processes():
     """Attempts to stop all running server processes."""
     global running_processes
     global shutting_down
-    
-    if shutting_down: # Avoid re-entry if already called
+
+    if shutting_down:  # Avoid re-entry if already called
         return
 
     shutting_down = True
     print(" - Initiating shutdown of all running server subprocesses...")
-    
+
     server_names_to_stop = list(running_processes.keys())
 
     for server_name in server_names_to_stop:
         process_info = running_processes.get(server_name)
-        if process_info and process_info.get('process'):
-            process = process_info['process']
-            with process_info['lock']:
+        if process_info and process_info.get("process"):
+            process = process_info["process"]
+            with process_info["lock"]:
                 if process.poll() is None:
                     print(f" - Stopping server {server_name} (PID: {process.pid}):")
-                    process_info['stop_requested'] = True
-                    if 'output' in process_info:
-                        process_info['output'].append("--- MAIN APP SHUTDOWN: STOP REQUESTED ---")
-                    
+                    process_info["stop_requested"] = True
+                    if "output" in process_info:
+                        process_info["output"].append("--- MAIN APP SHUTDOWN: STOP REQUESTED ---")
+
                     try:
                         # Using Popen for taskkill to allow timeout and non-blocking
-                        kill_proc = subprocess.Popen(['taskkill', '/F', '/T', '/PID', str(process.pid)],
-                                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        kill_proc = subprocess.Popen(
+                            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
                         try:
                             kill_proc.wait(timeout=5)
                         except subprocess.TimeoutExpired:
-                            print(f"   - taskkill for {server_name} (PID: {process.pid}) timed out. Process might still be terminating.")
+                            print(
+                                f"   - taskkill for {server_name} (PID: {process.pid}) timed out. Process might still be terminating."
+                            )
                             kill_proc.kill()
 
                         # Check process status after attempting taskkill
                         if process.poll() is None:
-                            print(f"   - Process {process.pid} for {server_name} did not terminate via taskkill, forcing kill...")
-                            process.kill() # Force kill the original process
+                            print(
+                                f"   - Process {process.pid} for {server_name} did not terminate via taskkill, forcing kill..."
+                            )
+                            process.kill()  # Force kill the original process
                             try:
-                                process.wait(timeout=5) # Wait for forced kill
+                                process.wait(timeout=5)  # Wait for forced kill
                             except subprocess.TimeoutExpired:
                                 print(f"   - Forced kill for {server_name} (PID: {process.pid}) timed out.")
-                        
+
                         status = "stopped" if process.poll() is not None else "failed to stop"
-                        if 'output' in process_info:
-                            process_info['output'].append(f"--- MAIN APP SHUTDOWN: SCRIPT {status.upper()} ---")
+                        if "output" in process_info:
+                            process_info["output"].append(f"--- MAIN APP SHUTDOWN: SCRIPT {status.upper()} ---")
                         print(f"   - Server {server_name} {status} during main app shutdown")
-                        process_info['process'] = None
+                        process_info["process"] = None
                     except Exception as e:
                         print(f"   - Error stopping {server_name} during main app shutdown: {e}")
-                        if 'output' in process_info:
-                            process_info['output'].append(f"--- MAIN APP SHUTDOWN: ERROR STOPPING SCRIPT: {e} ---")
+                        if "output" in process_info:
+                            process_info["output"].append(f"--- MAIN APP SHUTDOWN: ERROR STOPPING SCRIPT: {e} ---")
                 else:
-                    if process_info.get('process') is None and 'output' in process_info:
-                        process_info['output'].append(f"--- MAIN APP SHUTDOWN: Server {server_name} already stopped or not fully started ---")
+                    if process_info.get("process") is None and "output" in process_info:
+                        process_info["output"].append(
+                            f"--- MAIN APP SHUTDOWN: Server {server_name} already stopped or not fully started ---"
+                        )
                     print(f" - Server {server_name} already stopped")
 
     print("All subprocesses handled")
+
 
 def signal_handler(sig, frame):
     """Handles SIGINT (Ctrl+C) and SIGTERM for graceful shutdown."""
@@ -1483,14 +1569,14 @@ def signal_handler(sig, frame):
 
 
 # --- Main Execution ---
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     try:
         signal.signal(signal.SIGTERM, signal_handler)
-    except AttributeError: # SIGTERM may not be available on all Windows versions/Python builds
+    except AttributeError:  # SIGTERM may not be available on all Windows versions/Python builds
         print("SIGTERM signal not available on this platform. SIGINT (Ctrl+C) is handled.")
-    except ValueError: # Can happen if trying to register a signal not supported
+    except ValueError:  # Can happen if trying to register a signal not supported
         print("Could not register SIGTERM handler. SIGINT (Ctrl+C) is handled.")
 
     # Basic validation
@@ -1500,11 +1586,13 @@ if __name__ == '__main__':
         print("Please create the directory or correct the SERVERS_BASE_DIR path in the script.")
         sys.exit(1)
     if PASSWORD == "password":
-         print("WARNING: Default admin password is being used. Please change the PASSWORD variable in the script.")
+        print("WARNING: Default admin password is being used. Please change the PASSWORD variable in the script.")
     if COMMAND_PASSWORD == "cmdpass":
-         print("WARNING: Default command password is being used. Please change the COMMAND_PASSWORD variable in the script.")
+        print("WARNING: Default command password is being used. Please change the COMMAND_PASSWORD variable in the script.")
     if "FLASK_SECRET_KEY" not in os.environ and SECRET_KEY == _generated_secret_key_default:
-        print("INFO: Using a randomly generated SECRET_KEY for this session because FLASK_SECRET_KEY environment variable is not set. For consistent sessions across restarts, set this environment variable or a fixed value in the script.")
+        print(
+            "INFO: Using a randomly generated SECRET_KEY for this session because FLASK_SECRET_KEY environment variable is not set. For consistent sessions across restarts, set this environment variable or a fixed value in the script."
+        )
 
     print(f"Starting server control panel...")
     print(f" - Monitoring directory: {SERVERS_BASE_DIR}")
@@ -1522,22 +1610,21 @@ if __name__ == '__main__':
     else:
         print(" - SSL/TLS disabled (cert.pem or key.pem not found). Running over HTTP.")
 
-
     # Use Flask's development server (or deploy with a production server like Waitress/Gunicorn)
     try:
         # Use threaded=True to handle multiple requests (like SSE and actions) concurrently
         # use_reloader=False is important for custom signal handling to work reliably,
         # especially on Windows, as the reloader runs the app in a child process.
-        
+
         if USE_SSL:
             app.run(host=HOST, port=PORT, debug=False, threaded=True, ssl_context=ssl_context, use_reloader=False)
         else:
             app.run(host=HOST, port=PORT, debug=False, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt caught in main __name__ block. Ensuring cleanup...")
-        cleanup_processes() # Ensure cleanup is attempted
+        cleanup_processes()  # Ensure cleanup is attempted
     finally:
-        if not shutting_down: # If signal_handler wasn't called or didn't complete
+        if not shutting_down:  # If signal_handler wasn't called or didn't complete
             print("Application exiting without explicit signal handling completion. Attempting final cleanup...")
             cleanup_processes()
         print("Finished!")
