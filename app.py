@@ -1226,7 +1226,7 @@ HTML_TEMPLATE = """
         .command-button { background-color: #007bff; color: white; }
         .command-button:hover:not(:disabled) { background-color: #0056b3; }
         .logs-button { background-color: #17a2b8; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
-        .public-button { background-color: #ffc107; color: #212529; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
+        .public-button { background-color: #6c757d; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
         .logs-button:hover { background-color: #138496; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .status { font-style: italic; color: #666; font-size: 0.9em; min-width: 80px; text-align: right; }
