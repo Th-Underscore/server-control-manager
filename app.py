@@ -1319,21 +1319,22 @@ HTML_TEMPLATE = """
 
                 const parts = motd.split(/(§[0-9a-fk-or])/);
                 let html = '';
-                let openTags = [];
+                let closeTags = '';
 
                 parts.forEach(part => {
                     if (!part) return;
                     if (part.startsWith('§')) {
                         const code = part[1];
                         if (colorMap[code]) {
-                            html += '</span>'.repeat(openTags.length);
-                            openTags = [];
-                            const newTag = `<span style="color: ${colorMap[code]}">`;
-                            html += newTag;
-                            openTags.push('</span>');
+                            html += closeTags;
+                            html += `<span style="color: ${colorMap[code]}">`;
+                            closeTags = '</span>';
+                        } else if (styleMap[code]) {
+                            html += `<span style="${styleMap[code]}">`;
+                            closeTags += '</span>';
                         } else if (code === 'r') {
-                            html += '</span>'.repeat(openTags.length);
-                            openTags = [];
+                            html += closeTags;
+                            closeTags = '';
                         }
                     } else {
                         // Basic escaping for HTML
@@ -1342,7 +1343,7 @@ HTML_TEMPLATE = """
                     }
                 });
 
-                html += '</span>'.repeat(openTags.length);
+                html += closeTags;
                 return html;
             }
 
