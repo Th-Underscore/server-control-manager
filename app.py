@@ -191,7 +191,7 @@ def read_process_output(server_name, process):
         with process_info["lock"]:
             # Check if still exists before appending
             if server_name in running_processes:
-                running_processes[server_name]["output"].append(f"--- Error reading output: {e} ---")
+                running_processes[server_name]["output"].append(f"STY:error:--- Error reading output: {e} ---")
     finally:
         if process:
             if process.stdout:
@@ -205,7 +205,7 @@ def read_process_output(server_name, process):
         if server_name in running_processes:
             with running_processes[server_name]["lock"]:
                 if not running_processes[server_name]["stop_requested"]:
-                    running_processes[server_name]["output"].append("--- SCRIPT FINISHED ---")
+                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED ---")
 
                     # --- Backup Copy ---
                     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
@@ -254,27 +254,27 @@ def find_latest_backup_folder(backup_dir):
 
 def copy_latest_backup(server_name, server_path):
     """Copies the latest backup file or folder to the shared Backups directory."""
-    _log_to_server_output(server_name, "--- BACKUP START ---")
+    _log_to_server_output(server_name, "STY:marker:--- BACKUP START ---")
     source_backups_dir = os.path.join(server_path, "backups")
     # SERVERS_BASE_DIR/BACKUPS_DIR
     target_parent_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, BACKUPS_DIR))
 
     log_msg_checking = f"Checking for backups in: {source_backups_dir}"
     print(log_msg_checking)
-    _log_to_server_output(server_name, log_msg_checking)
+    _log_to_server_output(server_name, f"STY:log:{log_msg_checking}")
     latest_item_name = find_latest_backup_folder(source_backups_dir)
 
     if latest_item_name:
         log_msg_found = f"Found latest backup item: {latest_item_name}"
         print(log_msg_found)
-        _log_to_server_output(server_name, log_msg_found)
+        _log_to_server_output(server_name, f"STY:log:{log_msg_found}")
         source_path = os.path.join(source_backups_dir, latest_item_name)
         is_source_dir = os.path.isdir(source_path)
         dest_item_name = f"{server_name}_{latest_item_name}"
         dest_path = os.path.join(target_parent_dir, dest_item_name)
         log_msg_attempting = f"Attempting to copy backup from '{source_path}' to '{dest_path}'"
         print(log_msg_attempting)
-        _log_to_server_output(server_name, log_msg_attempting)
+        _log_to_server_output(server_name, f"STY:log:{log_msg_attempting}")
 
         try:
             os.makedirs(target_parent_dir, exist_ok=True)
@@ -282,8 +282,8 @@ def copy_latest_backup(server_name, server_path):
             if os.path.exists(dest_path):
                 skip_message = f"Destination backup item '{dest_item_name}' already exists. Skipping copy."
                 print(f"Warning: {skip_message}")
-                _log_to_server_output(server_name, skip_message)
-                _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+                _log_to_server_output(server_name, f"STY:log:{skip_message}")
+                _log_to_server_output(server_name, "STY:marker:--- BACKUP COMPLETE ---")
                 return f"Backup skipped (destination exists: {dest_item_name})"
 
             if is_source_dir:
@@ -293,26 +293,26 @@ def copy_latest_backup(server_name, server_path):
 
             success_message = f"Successfully copied backup '{dest_item_name}' to shared Backups."
             print(success_message)
-            _log_to_server_output(server_name, success_message)
-            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+            _log_to_server_output(server_name, f"STY:log:{success_message}")
+            _log_to_server_output(server_name, "STY:marker:--- BACKUP COMPLETE ---")
             return f"Backup copied ({dest_item_name})"
         except OSError as e:
             error_message = f"Error copying backup for {server_name}: {e}"
             print(error_message)
-            _log_to_server_output(server_name, error_message)
-            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+            _log_to_server_output(server_name, f"STY:error:{error_message}")
+            _log_to_server_output(server_name, "STY:marker:--- BACKUP COMPLETE ---")
             return f"Backup failed (Error: {e})"
         except Exception as e:
             error_message = f"Unexpected error during backup copy for {server_name}: {e}"
             print(error_message)
-            _log_to_server_output(server_name, error_message)
-            _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+            _log_to_server_output(server_name, f"STY:error:{error_message}")
+            _log_to_server_output(server_name, "STY:marker:--- BACKUP COMPLETE ---")
             return f"Backup failed (Unexpected Error: {e})"
     else:
         not_found_message = f"No backup items found or accessible in {source_backups_dir}"
         print(not_found_message)
-        _log_to_server_output(server_name, not_found_message)
-        _log_to_server_output(server_name, "--- BACKUP COMPLETE ---")
+        _log_to_server_output(server_name, f"STY:log:{not_found_message}")
+        _log_to_server_output(server_name, "STY:marker:--- BACKUP COMPLETE ---")
         return "No backups found to copy"
 
 
@@ -452,7 +452,7 @@ def start_server(server_name):
         new_lock = threading.RLock()
         running_processes[server_name] = {
             "process": process,
-            "output": [f"--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
+            "output": [f"STY:marker:--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
             "lock": new_lock,
             "stop_requested": False,
         }
@@ -508,8 +508,8 @@ def stop_server(server_name):
             return jsonify({"status": "info", "message": "Stop already in progress."}), 202
 
         print(f"Attempting graceful stop for {server_name} (PID: {process.pid})...")
-        process_info["output"].append("--- GRACEFUL STOP REQUESTED ---")
-        process_info["output"].append(">>> Sending 'stop' command...")
+        process_info["output"].append("STY:marker:--- GRACEFUL STOP REQUESTED ---")
+        process_info["output"].append("STY:stdin:stop")
         process_info["stop_requested"] = True
 
     # Release the lock before writing to stdin to prevent deadlock with the output reader thread
@@ -533,7 +533,7 @@ def stop_server(server_name):
                             and proc_info_timer.get("stop_requested")
                         ):
                             print(f"Graceful stop for {server_name} timed out. Forcing termination.")
-                            proc_info_timer["output"].append("--- GRACEFUL STOP TIMEOUT: FORCING STOP ---")
+                            proc_info_timer["output"].append("STY:marker:--- GRACEFUL STOP TIMEOUT: FORCING STOP ---")
                             _force_kill_process(server_name, proc_info_timer)
 
             timer_thread = threading.Thread(target=force_stop_after_delay, daemon=True)
@@ -550,7 +550,7 @@ def stop_server(server_name):
     except Exception as e:
         print(f"Error initiating graceful stop for {server_name}: {e}")
         with process_info["lock"]:
-            process_info["output"].append(f"--- ERROR INITIATING GRACEFUL STOP: {e} ---")
+            process_info["output"].append(f"STY:error:--- ERROR INITIATING GRACEFUL STOP: {e} ---")
         return jsonify({"status": "error", "message": f"Error initiating graceful stop: {e}"}), 500
 
 
@@ -569,7 +569,7 @@ def _force_kill_process(server_name, process_info):
             process.wait(timeout=5)
 
         final_status = "stopped" if process.poll() is not None else "failed to stop"
-        process_info["output"].append(f"--- SCRIPT FORCE {final_status.upper()} ---")
+        process_info["output"].append(f"STY:marker:--- SCRIPT FORCE {final_status.upper()} ---")
         process_info["process"] = None
 
         # Trigger backup on successful forced stop
@@ -583,7 +583,7 @@ def _force_kill_process(server_name, process_info):
         return final_status
     except Exception as e:
         print(f"Error during force kill for {server_name}: {e}")
-        process_info["output"].append(f"--- ERROR DURING FORCE KILL: {e} ---")
+        process_info["output"].append(f"STY:error:--- ERROR DURING FORCE KILL: {e} ---")
         return "error"
 
 
@@ -601,7 +601,7 @@ def force_stop_server(server_name):
         if process_info["process"].poll() is not None:
             return jsonify({"status": "error", "message": f"{server_name} has already finished."}), 400
 
-        process_info["output"].append("--- MANUAL FORCE STOP REQUESTED ---")
+        process_info["output"].append("STY:marker:--- MANUAL FORCE STOP REQUESTED ---")
         final_status = _force_kill_process(server_name, process_info)
 
         if final_status != "error":
@@ -704,13 +704,13 @@ def send_command(server_name):
 
         # Log the command to the server's output display as well
         with process_info["lock"]:
-            process_info["output"].append(f">>> CMD: {command_text.strip()}")
+            process_info["output"].append(f"STY:stdin:{command_text.strip()}")
 
         return jsonify({"status": "success", "message": "Command sent."})
     except Exception as e:
         print(f"Error sending command to {server_name}: {e}")
         with process_info["lock"]:
-            process_info["output"].append(f"--- ERROR SENDING COMMAND: {e} ---")
+            process_info["output"].append(f"STY:error:--- ERROR SENDING COMMAND: {e} ---")
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
 
@@ -1237,6 +1237,10 @@ HTML_TEMPLATE = """
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
         .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
+        .log-stdin { color: #e5e549; }
+        .log-marker { color: #7bb5b5; }
+        .log-error { color: #e54949; }
+        .log-log { color: #90d690; }
         .output-container { position: relative; }
         .scroll-to-bottom { position: absolute; bottom: 10px; right: 10px; background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: none; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
@@ -1614,7 +1618,25 @@ HTML_TEMPLATE = """
 
                 es.addEventListener('message', event => {
                     const line = document.createElement('p');
-                    line.textContent = event.data;
+                    const message = event.data;
+
+                    // Check for our special style prefix
+                    if (message.startsWith('STY:')) {
+                        // Split into parts: "STY", "type", "actual message"
+                        const parts = message.split(':', 3);
+                        if (parts.length === 3) {
+                            const type = parts[1]; // e.g., "stdin", "marker", "error", "log"
+                            const text = parts[2];
+                            line.textContent = text;
+                            line.classList.add(`log-${type}`); // Apply the CSS class
+                        } else {
+                            // Fallback for malformed message
+                            line.textContent = message;
+                        }
+                    } else {
+                        line.textContent = message; // stdout/stderr
+                    }
+
                     outputArea.appendChild(line);
 
                     // Auto-scroll if the user hasn't manually scrolled up
@@ -1804,7 +1826,7 @@ def cleanup_processes():
                     print(f" - Stopping server {server_name} (PID: {process.pid}):")
                     process_info["stop_requested"] = True
                     if "output" in process_info:
-                        process_info["output"].append("--- MAIN APP SHUTDOWN: STOP REQUESTED ---")
+                        process_info["output"].append("STY:marker:--- MAIN APP SHUTDOWN: STOP REQUESTED ---")
 
                     try:
                         # Using Popen for taskkill to allow timeout and non-blocking
@@ -1834,17 +1856,17 @@ def cleanup_processes():
 
                         status = "stopped" if process.poll() is not None else "failed to stop"
                         if "output" in process_info:
-                            process_info["output"].append(f"--- MAIN APP SHUTDOWN: SCRIPT {status.upper()} ---")
+                            process_info["output"].append(f"STY:marker:--- MAIN APP SHUTDOWN: SCRIPT {status.upper()} ---")
                         print(f"   - Server {server_name} {status} during main app shutdown")
                         process_info["process"] = None
                     except Exception as e:
                         print(f"   - Error stopping {server_name} during main app shutdown: {e}")
                         if "output" in process_info:
-                            process_info["output"].append(f"--- MAIN APP SHUTDOWN: ERROR STOPPING SCRIPT: {e} ---")
+                            process_info["output"].append(f"STY:marker:--- MAIN APP SHUTDOWN: ERROR STOPPING SCRIPT: {e} ---")
                 else:
                     if process_info.get("process") is None and "output" in process_info:
                         process_info["output"].append(
-                            f"--- MAIN APP SHUTDOWN: Server {server_name} already stopped or not fully started ---"
+                            f"STY:marker:--- MAIN APP SHUTDOWN: Server {server_name} already stopped or not fully started ---"
                         )
                     print(f" - Server {server_name} already stopped")
 
