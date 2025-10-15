@@ -714,21 +714,166 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
 
-@app.route("/public/<server_name>/<path:filename>")
+def get_human_readable_size(size, decimal_places=2):
+    """Converts a size in bytes to a human-readable format."""
+    if size is None:
+        return ""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            break
+        size /= 1024.0
+    return f"{size:.{decimal_places}f} {unit}"
+
+
+PUBLIC_FILES_LIST_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Public Files for {{ server_name }} - Server Control Panel</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
+        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: #555; }
+        .container { max-width: 900px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        .path-display { background-color: #e9ecef; padding: 10px; border-radius: 4px; margin-bottom: 20px; font-family: monospace; word-break: break-all; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+        td a { text-decoration: none; color: #007bff; display: block; }
+        td a:hover { text-decoration: underline; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: #5a6268; }
+        .icon { margin-right: 8px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <span>Server Manager - Public Files</span>
+        <span><a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+    </div>
+    <div class="container">
+        <h1>Public Files for: {{ server_name }}</h1>
+        <div class="path-display">Current Path: /public/{{ current_path }}</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Last Modified</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if parent_path is not none %}
+                <tr>
+                    <td colspan="3">
+                        <a href="{{ url_for('list_public_files', server_name=server_name, subpath=parent_path) }}">
+                            <span class="icon">&#128193;</span>../ (Parent Directory)
+                        </a>
+                    </td>
+                </tr>
+                {% endif %}
+                {% for dir in directories %}
+                <tr>
+                    <td colspan="3">
+                         <a href="{{ url_for('list_public_files', server_name=server_name, subpath=dir.path) }}">
+                            <span class="icon">&#128193;</span>{{ dir.name }}/
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% for file in files %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('download_public_file', server_name=server_name, path=file.path) }}" target="_blank">
+                           <span class="icon">&#128196;</span>{{ file.name }}
+                        </a>
+                    </td>
+                    <td>{{ file.size_human }}</td>
+                    <td>{{ file.modified }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if not directories and not files and parent_path is none %}
+        <p>This directory is empty.</p>
+        {% endif %}
+        <a href="{{ url_for('index') }}" class="back-link">Back to Main Panel</a>
+    </div>
+</body>
+</html>
+"""
+
+
+@app.route("/public/<server_name>/", defaults={"subpath": ""})
+@app.route("/public/<server_name>/<path:subpath>")
 @login_required
-def public_files(server_name, filename):
-    """Serves files from the public directory of a server."""
+def list_public_files(server_name, subpath):
+    """Lists files and directories in the server's public folder."""
     servers = get_server_folders()
     if server_name not in servers:
         abort(404, "Server not found.")
 
-    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-    public_dir = os.path.join(server_path, "public")
+    base_public_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, server_name, "public"))
+    requested_path = os.path.abspath(os.path.join(base_public_dir, subpath))
 
-    if not os.path.isdir(public_dir):
-        abort(404, "Public directory not found for this server.")
+    # Security Check: Ensure the requested path is inside the public directory
+    if not requested_path.startswith(base_public_dir) or not os.path.isdir(requested_path):
+        abort(404, "Directory not found or access denied.")
 
-    return send_from_directory(public_dir, filename)
+    directories = []
+    files = []
+
+    try:
+        for item_name in sorted(os.listdir(requested_path), key=str.lower):
+            full_path = os.path.join(requested_path, item_name)
+            # Create a relative path from the *base* public dir for URL generation
+            relative_path = os.path.relpath(full_path, base_public_dir).replace("\\", "/")
+            
+            stat_info = os.stat(full_path)
+            modified_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+            if os.path.isdir(full_path):
+                directories.append({"name": item_name, "path": relative_path})
+            else:
+                files.append({
+                    "name": item_name,
+                    "path": relative_path,
+                    "size_human": get_human_readable_size(stat_info.st_size),
+                    "modified": modified_time
+                })
+    except OSError as e:
+        flash(f"Error reading directory: {e}", "danger")
+
+    parent_path = None
+    if requested_path != base_public_dir:
+        parent_path = os.path.dirname(subpath)
+
+    return render_template_string(
+        PUBLIC_FILES_LIST_TEMPLATE,
+        server_name=server_name,
+        current_path=subpath,
+        parent_path=parent_path,
+        directories=directories,
+        files=files,
+        username=current_user.username,
+    )
+
+@app.route("/download/<server_name>/<path:path>")
+@login_required
+def download_public_file(server_name, path):
+    """Serves a specific file for download/viewing."""
+    servers = get_server_folders()
+    if server_name not in servers:
+        abort(404, "Server not found.")
+
+    public_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, server_name, "public"))
+    
+    # send_from_directory handles security checks against path traversal
+    return send_from_directory(public_dir, path, as_attachment=False) # as_attachment=False tries to display in browser
 
 
 # --- Server-Specific Log Viewing ---
@@ -1132,7 +1277,7 @@ HTML_TEMPLATE = """
                             <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
                             <button class="force-stop-button" data-server="{{ server }}">Force Stop</button>
                             <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
-                            <a href="{{ url_for('public_files', server_name=server, filename='index.html') }}" class="public-button" data-server="{{ server }}">Public Files</a>
+                            <a href="{{ url_for('list_public_files', server_name=server) }}" class="public-button" data-server="{{ server }}">Public Files</a>
                             <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
                         </div>
                     </div>
