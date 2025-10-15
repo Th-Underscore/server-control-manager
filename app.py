@@ -26,6 +26,7 @@ from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
 import gzip
 from datetime import datetime
+import base64
 
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
@@ -89,9 +90,7 @@ class User(UserMixin):
         return None
 
 
-# Store user credentials securely (using password hashes)
 users_storage = {USERNAME: generate_password_hash(PASSWORD)}
-# Store command password hash
 COMMAND_PASSWORD_HASH = generate_password_hash(COMMAND_PASSWORD)
 
 
@@ -124,6 +123,19 @@ def get_server_properties(server_path):
         except Exception as e:
             print(f"Error reading server.properties for {os.path.basename(server_path)}: {e}")
     return properties
+
+
+def get_server_icon(server_path):
+    """Reads server-icon.png and returns it as a base64 encoded string."""
+    icon_path = os.path.join(server_path, "server-icon.png")
+    if os.path.isfile(icon_path):
+        try:
+            with open(icon_path, "rb") as f:
+                encoded_string = base64.b64encode(f.read()).decode("utf-8")
+                return f"data:image/png;base64,{encoded_string}"
+        except Exception as e:
+            print(f"Error reading server icon for {os.path.basename(server_path)}: {e}")
+    return None
 
 
 # --- Helper Functions (get_server_folders, read_process_output - unchanged from previous version) ---
@@ -207,7 +219,6 @@ def read_process_output(server_name, process):
 # --- Backup Helper ---
 def _log_to_server_output(server_name, message):
     """Helper to log messages to a specific server's output stream, displayed in the UI."""
-    # NOTE: This is an internal helper.
     global running_processes
     if server_name in running_processes:
         process_info = running_processes[server_name]
@@ -354,9 +365,11 @@ def index():
     for server_name in servers:
         server_path = os.path.join(SERVERS_BASE_DIR, server_name)
         properties = get_server_properties(server_path)
+        icon = get_server_icon(server_path)
         server_details[server_name] = {
             "motd": properties.get("motd", "No MOTD found"),
-            "version": properties.get("version", ""),  # Assuming 'version' might be in server.properties
+            "version": properties.get("version", ""),
+            "icon": icon,
         }
 
     # Pass server status (running or not) to the template
@@ -1029,9 +1042,13 @@ HTML_TEMPLATE = """
         .flash-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
         .server-list { list-style: none; padding: 0; }
         .server-item { background: #e9e9e9; margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
-        .server-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .server-name { font-weight: bold; flex-grow: 1; min-width: 100px; }
-        .server-version { color: #6c757d; font-style: italic; font-size: 0.9em; }
+        .server-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; }
+        .server-details-container { display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; /* Allow shrinking */ }
+        .server-icon { width: 64px; height: 64px; image-rendering: pixelated; margin-right: 10px; border-radius: 4px; flex-shrink: 0; }
+        .server-name-motd { display: flex; flex-direction: column; min-width: 0; /* Allow shrinking */ }
+        .server-name { font-weight: bold; }
+        .server-motd { color: #6c757d; font-size: 0.9em; font-family: 'Minecraftia', monospace; white-space: pre-wrap; word-break: break-all; }
+        .server-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
         button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
         button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
         input[type="text"], input[type="password"] { border: 1px solid #ccc; }
@@ -1080,14 +1097,23 @@ HTML_TEMPLATE = """
                 {% for server in servers %}
                 <li class="server-item" id="server-{{ server }}">
                     <div class="server-controls">
-                        <span class="server-name">{{ server }}</span>
-                        <span class="server-version"><em>{{ server_details[server]['motd'] }}</em></span>
-                        <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
-                        <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
-                        <button class="force-stop-button" data-server="{{ server }}">Force Stop</button>
-                        <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
-                        <a href="{{ url_for('public_files', server_name=server, filename='index.html') }}" class="public-button" data-server="{{ server }}">Public Files</a>
-                        <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
+                        <div class="server-details-container">
+                            {% if server_details[server]['icon'] %}
+                                <img src="{{ server_details[server]['icon'] }}" alt="Server Icon" class="server-icon">
+                            {% endif %}
+                            <div class="server-name-motd">
+                                <span class="server-name">{{ server }}</span>
+                                <span class="server-motd" data-motd="{{ server_details[server]['motd'] }}">{{ server_details[server]['motd'] }}</span>
+                            </div>
+                        </div>
+                        <div class="server-actions">
+                            <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
+                            <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
+                            <button class="force-stop-button" data-server="{{ server }}">Force Stop</button>
+                            <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
+                            <a href="{{ url_for('public_files', server_name=server, filename='index.html') }}" class="public-button" data-server="{{ server }}">Public Files</a>
+                            <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
+                        </div>
                     </div>
                     <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
                         <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
@@ -1111,10 +1137,62 @@ HTML_TEMPLATE = """
     <script>
         // --- JavaScript for handling buttons and SSE (Server-Sent Events) ---
         document.addEventListener('DOMContentLoaded', () => {
+            function parseMotd(motd) {
+                const colorMap = {
+                    '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
+                    '4': '#AA0000', '5': '#AA00AA', '6': '#FFAA00', '7': '#AAAAAA',
+                    '8': '#555555', '9': '#5555FF', 'a': '#55FF55', 'b': '#55FFFF',
+                    'c': '#FF5555', 'd': '#FF55FF', 'e': '#FFFF55', 'f': '#FFFFFF'
+                };
+                const styleMap = {
+                    'l': 'font-weight: bold;',
+                    'm': 'text-decoration: line-through;',
+                    'n': 'text-decoration: underline;',
+                    'o': 'font-style: italic;'
+                };
+
+                const parts = motd.split(/(§[0-9a-fk-or])/);
+                let html = '';
+                let openTags = [];
+
+                parts.forEach(part => {
+                    if (!part) return;
+                    if (part.startsWith('§')) {
+                        const code = part[1];
+                        if (colorMap[code]) {
+                            html += '</span>'.repeat(openTags.length);
+                            openTags = [];
+                            const newTag = `<span style="color: ${colorMap[code]}">`;
+                            html += newTag;
+                            openTags.push('</span>');
+                        } else if (styleMap[code]) {
+                            const newTag = `<span style="${styleMap[code]}">`;
+                            html += newTag;
+                            openTags.push('</span>');
+                        } else if (code === 'r') {
+                            html += '</span>'.repeat(openTags.length);
+                            openTags = [];
+                        }
+                    } else {
+                        // Basic escaping for HTML
+                        const escapedPart = part.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+                        html += escapedPart;
+                    }
+                });
+
+                html += '</span>'.repeat(openTags.length);
+                return html;
+            }
+
             const serverItems = document.querySelectorAll('.server-item');
             let eventSources = {}; // Store EventSource objects { server_name: eventSource }
 
             serverItems.forEach(item => {
+                const motdElement = item.querySelector('.server-motd');
+                if (motdElement) {
+                    const rawMotd = motdElement.getAttribute('data-motd');
+                    motdElement.innerHTML = parseMotd(rawMotd);
+                }
                 const serverName = item.id.replace('server-', '');
                 const startButton = item.querySelector('.start-button');
                 const stopButton = item.querySelector('.stop-button');
