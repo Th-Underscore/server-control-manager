@@ -44,7 +44,7 @@ COMMAND_PASSWORD = os.getenv("CMD_PASSWORD", "cmdpass")  # !!! CHANGE THIS COMMA
 # For production, set this via environment variable or config file.
 _generated_secret_key_default = secrets.token_hex(24)
 SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", _generated_secret_key_default)
-# SSL Certificate (Optional - uncomment app.run line below to enable)
+# SSL Certificate
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"  # "C:\\Users\\Me\\server.key"
 USE_SSL = False
@@ -121,7 +121,7 @@ def get_server_properties(server_path):
                         if "=" in line:
                             key, value = line.split("=", 1)
                             # Unescape characters like \:, \=, etc.
-                            value = re.sub(r'\\(.)', r'\1', value.strip())
+                            value = re.sub(r"\\(.)", r"\1", value.strip())
                             properties[key.strip()] = value
         except Exception as e:
             print(f"Error reading server.properties for {os.path.basename(server_path)}: {e}")
@@ -718,7 +718,7 @@ def get_human_readable_size(size, decimal_places=2):
     """Converts a size in bytes to a human-readable format."""
     if size is None:
         return ""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024.0:
             break
         size /= 1024.0
@@ -832,19 +832,21 @@ def list_public_files(server_name, subpath):
             full_path = os.path.join(requested_path, item_name)
             # Create a relative path from the *base* public dir for URL generation
             relative_path = os.path.relpath(full_path, base_public_dir).replace("\\", "/")
-            
+
             stat_info = os.stat(full_path)
             modified_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
             if os.path.isdir(full_path):
                 directories.append({"name": item_name, "path": relative_path})
             else:
-                files.append({
-                    "name": item_name,
-                    "path": relative_path,
-                    "size_human": get_human_readable_size(stat_info.st_size),
-                    "modified": modified_time
-                })
+                files.append(
+                    {
+                        "name": item_name,
+                        "path": relative_path,
+                        "size_human": get_human_readable_size(stat_info.st_size),
+                        "modified": modified_time,
+                    }
+                )
     except OSError as e:
         flash(f"Error reading directory: {e}", "danger")
 
@@ -862,6 +864,7 @@ def list_public_files(server_name, subpath):
         username=current_user.username,
     )
 
+
 @app.route("/download/<server_name>/<path:path>")
 @login_required
 def download_public_file(server_name, path):
@@ -871,9 +874,9 @@ def download_public_file(server_name, path):
         abort(404, "Server not found.")
 
     public_dir = os.path.abspath(os.path.join(SERVERS_BASE_DIR, server_name, "public"))
-    
+
     # send_from_directory handles security checks against path traversal
-    return send_from_directory(public_dir, path, as_attachment=False) # as_attachment=False tries to display in browser
+    return send_from_directory(public_dir, path, as_attachment=False)  # as_attachment=False tries to display in browser
 
 
 # --- Server-Specific Log Viewing ---
