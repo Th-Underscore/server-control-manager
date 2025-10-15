@@ -732,28 +732,82 @@ PUBLIC_FILES_LIST_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Public Files for {{ server_name }} - Server Control Panel</title>
+    <script>
+        // Apply theme immediately to prevent flashing
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            }
+        })();
+    </script>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
-        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
-        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
-        .navbar a:hover { background-color: #555; }
-        .container { max-width: 900px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
-        .path-display { background-color: #e9ecef; padding: 10px; border-radius: 4px; margin-bottom: 20px; font-family: monospace; word-break: break-all; }
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --navbar-bg: #333;
+            --navbar-text: white;
+            --navbar-hover: #555;
+            --container-bg: #fff;
+            --header-color: #555;
+            --border-color: #eee;
+            --table-border: #ddd;
+            --th-bg: #f8f9fa;
+            --path-bg: #e9ecef;
+            --link-color: #007bff;
+            --button-bg: #6c757d;
+            --button-hover-bg: #5a6268;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --navbar-bg: #252525;
+            --navbar-text: #e0e0e0;
+            --navbar-hover: #444;
+            --container-bg: #2c2c2c;
+            --header-color: #ccc;
+            --border-color: #444;
+            --table-border: #555;
+            --th-bg: #3a3a3a;
+            --path-bg: #333;
+            --link-color: #58a6ff;
+            --button-bg: #555;
+            --button-hover-bg: #777;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
+        .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
+        .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
+        .navbar a { color: var(--navbar-text); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: var(--navbar-hover); }
+        #theme-toggle { background: none; border: 1px solid var(--navbar-text); color: var(--navbar-text); cursor: pointer; border-radius: 5px; padding: 5px 8px; font-size: 1.2em; }
+        .container { max-width: 900px; margin: 20px auto; background: var(--container-bg); padding: 20px; border-radius: 8px; box-shadow: var(--box-shadow); }
+        h1 { color: var(--header-color); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px; }
+        .path-display { background-color: var(--path-bg); padding: 10px; border-radius: 4px; margin-bottom: 20px; font-family: monospace; word-break: break-all; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #ddd; }
-        th { background-color: #f8f9fa; }
-        td a { text-decoration: none; color: #007bff; display: block; }
+        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--table-border); }
+        th { background-color: var(--th-bg); }
+        td a { text-decoration: none; color: var(--link-color); display: block; }
         td a:hover { text-decoration: underline; }
-        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
-        .back-link:hover { background-color: #5a6268; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: var(--button-bg); color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: var(--button-hover-bg); }
         .icon { margin-right: 8px; }
     </style>
 </head>
 <body>
     <div class="navbar">
-        <span>Server Manager - Public Files</span>
-        <span><a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+        <div class="left-nav">
+            <span>Server Manager - Public Files</span>
+        </div>
+        <div class="right-nav">
+            <a href="{{ url_for('index') }}">Main Panel</a>
+            <span>Welcome, {{ current_user.username }}!</span>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            <button id="theme-toggle">◐</button>
+        </div>
     </div>
     <div class="container">
         <h1>Public Files for: {{ server_name }}</h1>
@@ -803,6 +857,14 @@ PUBLIC_FILES_LIST_TEMPLATE = """
         {% endif %}
         <a href="{{ url_for('index') }}" class="back-link">Back to Main Panel</a>
     </div>
+    <script>
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark-mode');
+            const theme = html.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
+    </script>
 </body>
 </html>
 """
@@ -889,34 +951,95 @@ SERVER_LOGS_LIST_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logs for {{ server_name }} - Server Control Panel</title>
+    <script>
+        // Apply theme immediately to prevent flashing
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            }
+        })();
+    </script>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
-        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
-        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
-        .navbar a:hover { background-color: #555; }
-        .container { max-width: 900px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --navbar-bg: #333;
+            --navbar-text: white;
+            --navbar-hover: #555;
+            --container-bg: #fff;
+            --header-color: #555;
+            --border-color: #eee;
+            --table-border: #ddd;
+            --th-bg: #f0f0f0;
+            --link-color: #007bff;
+            --button-bg: #6c757d;
+            --button-hover-bg: #5a6268;
+            --pagination-border: #ddd;
+            --pagination-disabled: #ccc;
+            --pagination-current-bg: #007bff;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --navbar-bg: #252525;
+            --navbar-text: #e0e0e0;
+            --navbar-hover: #444;
+            --container-bg: #2c2c2c;
+            --header-color: #ccc;
+            --border-color: #444;
+            --table-border: #555;
+            --th-bg: #3a3a3a;
+            --link-color: #58a6ff;
+            --button-bg: #555;
+            --button-hover-bg: #777;
+            --pagination-border: #555;
+            --pagination-disabled: #555;
+            --pagination-current-bg: #58a6ff;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
+        .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
+        .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
+        .navbar a { color: var(--navbar-text); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: var(--navbar-hover); }
+        #theme-toggle { background: none; border: 1px solid var(--navbar-text); color: var(--navbar-text); cursor: pointer; border-radius: 5px; padding: 5px 8px; font-size: 1.2em; }
+        .container { max-width: 900px; margin: 20px auto; background: var(--container-bg); padding: 20px; border-radius: 8px; box-shadow: var(--box-shadow); }
+        h1 { color: var(--header-color); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px; }
         .flash-messages { list-style: none; padding: 0; margin-bottom: 15px; }
         .flash-messages li { padding: 10px 15px; margin-bottom: 10px; border-radius: 4px; }
         .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .flash-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+        .dark-mode .flash-danger { background-color: #582a2e; color: #f5c6cb; border-color: #721c24; }
+        .dark-mode .flash-warning { background-color: #66542c; color: #ffeeba; border-color: #856404; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
-        th { background-color: #f0f0f0; }
-        a { color: #007bff; text-decoration: none; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--table-border); }
+        th { background-color: var(--th-bg); }
+        a { color: var(--link-color); text-decoration: none; }
         a:hover { text-decoration: underline; }
         .pagination { margin-top: 20px; text-align: center; }
-        .pagination a, .pagination span { display: inline-block; padding: 8px 12px; margin: 0 2px; border: 1px solid #ddd; border-radius: 4px; color: #007bff; }
-        .pagination span.current { background-color: #007bff; color: white; border-color: #007bff; }
-        .pagination span.disabled { color: #ccc; border-color: #eee; }
-        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
-        .back-link:hover { background-color: #5a6268; }
+        .pagination a, .pagination span { display: inline-block; padding: 8px 12px; margin: 0 2px; border: 1px solid var(--pagination-border); border-radius: 4px; color: var(--link-color); }
+        .pagination span.current { background-color: var(--pagination-current-bg); color: white; border-color: var(--pagination-current-bg); }
+        .pagination span.disabled { color: var(--pagination-disabled); border-color: #eee; }
+        .dark-mode .pagination span.disabled { color: #666; border-color: #444; }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: var(--button-bg); color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: var(--button-hover-bg); }
     </style>
 </head>
 <body>
     <div class="navbar">
-        <span>Server Manager - Logs for {{ server_name }}</span>
-        <span><a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+        <div class="left-nav">
+             <span>Server Manager - Logs for {{ server_name }}</span>
+        </div>
+        <div class="right-nav">
+            <a href="{{ url_for('index') }}">Main Panel</a>
+            <span>Welcome, {{ current_user.username }}!</span>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            <button id="theme-toggle">◐</button>
+        </div>
     </div>
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -988,6 +1111,14 @@ SERVER_LOGS_LIST_TEMPLATE = """
         {% endif %}
         <a href="{{ url_for('index') }}" class="back-link">Back to Main Panel</a>
     </div>
+    <script>
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark-mode');
+            const theme = html.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
+    </script>
 </body>
 </html>
 """
@@ -999,22 +1130,73 @@ SERVER_LOG_VIEW_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Log: {{ log_filename }} ({{ server_name }}) - Server Control Panel</title>
+    <script>
+        // Apply theme immediately to prevent flashing
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            }
+        })();
+    </script>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
-        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
-        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
-        .navbar a:hover { background-color: #555; }
-        .container { max-width: 1200px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h1 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
-        .log-content { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; max-height: 70vh; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
-        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: #6c757d; color: white; border-radius: 4px; text-decoration: none; }
-        .back-link:hover { background-color: #5a6268; }
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --navbar-bg: #333;
+            --navbar-text: white;
+            --navbar-hover: #555;
+            --container-bg: #fff;
+            --header-color: #555;
+            --border-color: #eee;
+            --button-bg: #6c757d;
+            --button-hover-bg: #5a6268;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            --log-bg: #222;
+            --log-text: #eee;
+            --log-border: #444;
+        }
+
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --navbar-bg: #252525;
+            --navbar-text: #e0e0e0;
+            --navbar-hover: #444;
+            --container-bg: #2c2c2c;
+            --header-color: #ccc;
+            --border-color: #444;
+            --button-bg: #555;
+            --button-hover-bg: #777;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            /* Log colors are already dark, so they don't need to change much */
+        }
+
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
+        .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
+        .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
+        .navbar a { color: var(--navbar-text); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: var(--navbar-hover); }
+        #theme-toggle { background: none; border: 1px solid var(--navbar-text); color: var(--navbar-text); cursor: pointer; border-radius: 5px; padding: 5px 8px; font-size: 1.2em; }
+        .container { max-width: 1200px; margin: 20px auto; background: var(--container-bg); padding: 20px; border-radius: 8px; box-shadow: var(--box-shadow); }
+        h1 { color: var(--header-color); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px; }
+        .log-content { background-color: var(--log-bg); color: var(--log-text); font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; max-height: 70vh; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid var(--log-border); }
+        .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: var(--button-bg); color: white; border-radius: 4px; text-decoration: none; }
+        .back-link:hover { background-color: var(--button-hover-bg); }
     </style>
 </head>
 <body>
     <div class="navbar">
-        <span>Server Manager - Log Viewer</span>
-        <span><a href="{{ url_for('list_server_logs_default', server_name=server_name) }}">Back to {{ server_name }} Logs</a> | <a href="{{ url_for('index') }}">Main Panel</a> | Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+        <div class="left-nav">
+            <span>Server Manager - Log Viewer</span>
+        </div>
+        <div class="right-nav">
+            <a href="{{ url_for('list_server_logs_default', server_name=server_name) }}">Back to {{ server_name }} Logs</a>
+            <a href="{{ url_for('index') }}">Main Panel</a>
+            <span>Welcome, {{ current_user.username }}!</span>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            <button id="theme-toggle">◐</button>
+        </div>
     </div>
     <div class="container">
         <h1>Log: {{ log_filename }} <small>(Server: {{ server_name }})</small></h1>
@@ -1032,6 +1214,14 @@ SERVER_LOG_VIEW_TEMPLATE = """
         </div>
         <a href="{{ url_for('list_server_logs_default', server_name=server_name) }}" class="back-link">Back to {{ server_name }} Log List</a>
     </div>
+     <script>
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark-mode');
+            const theme = html.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
+    </script>
 </body>
 </html>
 """
@@ -1191,49 +1381,113 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Server Control Panel</title>
+    <script>
+        // Apply theme immediately to prevent flashing
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            }
+        })();
+    </script>
     <style>
-        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: #f4f4f4; color: #333; }
-        .navbar { background-color: #333; padding: 10px 20px; color: white; display: flex; justify-content: space-between; align-items: center; }
-        .navbar a { color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; }
-        .navbar a:hover { background-color: #555; }
-        .container { max-width: 900px; margin: 20px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        h1, h2 { color: #555; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --navbar-bg: #333;
+            --navbar-text: white;
+            --navbar-hover: #555;
+            --container-bg: #fff;
+            --header-color: #555;
+            --border-color: #eee;
+            --server-item-bg: #e9e9e9;
+            --server-motd-color: #6c757d;
+            --input-bg: white;
+            --input-border: #ccc;
+            --input-text: #333;
+            --status-text: #666;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+
+            --flash-success-bg: #d4edda;
+            --flash-success-text: #155724;
+            --flash-success-border: #c3e6cb;
+            --flash-danger-bg: #f8d7da;
+            --flash-danger-text: #721c24;
+            --flash-danger-border: #f5c6cb;
+            --flash-info-bg: #d1ecf1;
+            --flash-info-text: #0c5460;
+            --flash-info-border: #bee5eb;
+        }
+
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --navbar-bg: #252525;
+            --navbar-text: #e0e0e0;
+            --navbar-hover: #444;
+            --container-bg: #2c2c2c;
+            --header-color: #ccc;
+            --border-color: #444;
+            --server-item-bg: #3a3a3a;
+            --server-motd-color: #aaa;
+            --input-bg: #252525;
+            --input-border: #555;
+            --input-text: #e0e0e0;
+            --status-text: #aaa;
+            --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+
+            --flash-success-bg: #2a4b37;
+            --flash-success-text: #d4edda;
+            --flash-success-border: #155724;
+            --flash-danger-bg: #582a2e;
+            --flash-danger-text: #f8d7da;
+            --flash-danger-border: #721c24;
+            --flash-info-bg: #2c5a68;
+            --flash-info-text: #d1ecf1;
+            --flash-info-border: #0c5460;
+        }
+
+        body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
+        .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
+        .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
+        .navbar a { color: var(--navbar-text); text-decoration: none; padding: 5px 10px; border-radius: 4px; }
+        .navbar a:hover { background-color: var(--navbar-hover); }
+        #theme-toggle { background: none; border: 1px solid var(--navbar-text); color: var(--navbar-text); cursor: pointer; border-radius: 5px; padding: 5px 8px; font-size: 1.2em; }
+        .container { max-width: 900px; margin: 20px auto; background: var(--container-bg); padding: 20px; border-radius: 8px; box-shadow: var(--box-shadow); }
+        h1, h2 { color: var(--header-color); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px; }
         .flash-messages { list-style: none; padding: 0; margin-bottom: 15px; }
         .flash-messages li { padding: 10px 15px; margin-bottom: 10px; border-radius: 4px; }
-        .flash-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .flash-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .flash-success { background-color: var(--flash-success-bg); color: var(--flash-success-text); border: 1px solid var(--flash-success-border); }
+        .flash-danger { background-color: var(--flash-danger-bg); color: var(--flash-danger-text); border: 1px solid var(--flash-danger-border); }
+        .flash-info { background-color: var(--flash-info-bg); color: var(--flash-info-text); border: 1px solid var(--flash-info-border); }
         .server-list { list-style: none; padding: 0; }
-        .server-item { background: #e9e9e9; margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
+        .server-item { background: var(--server-item-bg); margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
         .server-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; }
-        .server-details-container { display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; /* Allow shrinking */ }
+        .server-details-container { display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; }
         .server-icon { width: 64px; height: 64px; image-rendering: pixelated; margin-right: 10px; border-radius: 4px; flex-shrink: 0; }
-        .server-name-motd { display: flex; flex-direction: column; min-width: 0; /* Allow shrinking */ }
+        .server-name-motd { display: flex; flex-direction: column; min-width: 0; }
         .server-name { font-weight: bold; }
-        .server-motd {
-            color: #6c757d;
-            font-size: 0.9em;
-            font-family: 'Minecraftia', monospace;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
+        .server-motd { color: var(--server-motd-color); font-size: 0.9em; font-family: 'Minecraftia', monospace; white-space: pre-wrap; word-break: break-all; }
         .server-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
         button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
         button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
-        input[type="text"], input[type="password"] { border: 1px solid #ccc; }
+        input[type="text"], input[type="password"] { border: 1px solid var(--input-border); background-color: var(--input-bg); color: var(--input-text); }
         .start-button { background-color: #28a745; color: white; }
         .start-button:hover:not(:disabled) { background-color: #218838; }
         .stop-button { background-color: #dc3545; color: white; }
-        .force-stop-button { background-color: #b32532; color: white; display: none; } /* Initially hidden */
+        .force-stop-button { background-color: #b32532; color: white; display: none; }
         .stop-button:hover:not(:disabled) { background-color: #c82333; }
         .command-button { background-color: #007bff; color: white; }
         .command-button:hover:not(:disabled) { background-color: #0056b3; }
-        .logs-button { background-color: #17a2b8; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
-        .public-button { background-color: #6c757d; color: white; text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle;}
+        .logs-button { background-color: #17a2b8; color: white; }
+        .public-button { background-color: #6c757d; color: white; }
+        .logs-button, .public-button { text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle; }
         .logs-button:hover { background-color: #138496; }
+        .public-button:hover { background-color: #5a6268; }
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
-        .status { font-style: italic; color: #666; font-size: 0.9em; min-width: 80px; text-align: right; }
-        .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .dark-mode button:disabled { background-color: #555; color: #aaa; }
+        .status { font-style: italic; color: var(--status-text); font-size: 0.9em; min-width: 80px; text-align: right; }
+        .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
         .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
@@ -1248,8 +1502,14 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="navbar">
-        <span>Server Manager</span>
-        <span>Welcome, {{ username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+        <div class="left-nav">
+             <span>Server Manager</span>
+        </div>
+        <div class="right-nav">
+            <span>Welcome, {{ username }}!</span>
+            <a href="{{ url_for('logout') }}">Logout</a>
+            <button id="theme-toggle">◐</button>
+        </div>
     </div>
 
     <div class="container">
@@ -1308,6 +1568,14 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        // --- Theme Toggle ---
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark-mode');
+            const theme = html.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
+
         // --- JavaScript for handling buttons and SSE (Server-Sent Events) ---
         document.addEventListener('DOMContentLoaded', () => {
             function parseMotd(motd) {
@@ -1751,25 +2019,72 @@ LOGIN_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Server Control Panel</title>
+     <script>
+        // Apply theme immediately to prevent flashing
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark-mode');
+            }
+        })();
+    </script>
     <style>
-        body { font-family: sans-serif; background-color: #f4f4f4; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .login-container { background: #fff; padding: 30px 40px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); text-align: center; width: 100%; max-width: 400px; }
-        h1 { color: #555; margin-bottom: 20px; }
+        :root {
+            --bg-color: #f4f4f4;
+            --text-color: #333;
+            --login-bg: #fff;
+            --header-color: #555;
+            --input-bg: white;
+            --input-border: #ccc;
+            --input-text: #333;
+            --button-bg: #007bff;
+            --button-hover: #0056b3;
+            --box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            --flash-danger-bg: #f8d7da;
+            --flash-danger-text: #721c24;
+            --flash-danger-border: #f5c6cb;
+            --flash-info-bg: #d1ecf1;
+            --flash-info-text: #0c5460;
+            --flash-info-border: #bee5eb;
+        }
+        .dark-mode {
+            --bg-color: #1a1a1a;
+            --text-color: #e0e0e0;
+            --login-bg: #2c2c2c;
+            --header-color: #ccc;
+            --input-bg: #252525;
+            --input-border: #555;
+            --input-text: #e0e0e0;
+            --button-bg: #007bff;
+            --button-hover: #0056b3;
+            --box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            --flash-danger-bg: #582a2e;
+            --flash-danger-text: #f8d7da;
+            --flash-danger-border: #721c24;
+            --flash-info-bg: #2c5a68;
+            --flash-info-text: #d1ecf1;
+            --flash-info-border: #0c5460;
+        }
+        body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; transition: background-color 0.2s, color 0.2s; }
+        .login-container { background: var(--login-bg); padding: 30px 40px; border-radius: 8px; box-shadow: var(--box-shadow); text-align: center; width: 100%; max-width: 400px; position: relative; }
+        #theme-toggle { position: absolute; top: 10px; right: 10px; background: none; border: 1px solid var(--text-color); color: var(--text-color); cursor: pointer; border-radius: 50%; width: 30px; height: 30px; font-size: 1.2em; line-height: 1; padding: 0; }
+        h1 { color: var(--header-color); margin-bottom: 20px; }
         .form-group { margin-bottom: 15px; text-align: left; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: var(--text-color); }
+        input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid var(--input-border); background-color: var(--input-bg); color: var(--input-text); border-radius: 4px; box-sizing: border-box; }
         .remember-me { margin-bottom: 20px; text-align: left; display: flex; align-items: center; }
         .remember-me input { margin-right: 5px; }
-        button { background-color: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; width: 100%; transition: background-color 0.2s ease; }
-        button:hover { background-color: #0056b3; }
+        button { background-color: var(--button-bg); color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; width: 100%; transition: background-color 0.2s ease; }
+        button:hover { background-color: var(--button-hover); }
         .flash-messages { list-style: none; padding: 0; margin-bottom: 15px; }
         .flash-messages li { padding: 10px 15px; margin-bottom: 10px; border-radius: 4px; text-align: center; }
-        .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .flash-info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .flash-danger { background-color: var(--flash-danger-bg); color: var(--flash-danger-text); border: 1px solid var(--flash-danger-border); }
+        .flash-info { background-color: var(--flash-info-bg); color: var(--flash-info-text); border: 1px solid var(--flash-info-border); }
     </style>
 </head>
 <body>
     <div class="login-container">
+        <button id="theme-toggle">◐</button>
         <h1>Server Manager Login</h1>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -1798,6 +2113,14 @@ LOGIN_TEMPLATE = """
             <button type="submit">Login</button>
         </form>
     </div>
+    <script>
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const html = document.documentElement;
+            html.classList.toggle('dark-mode');
+            const theme = html.classList.contains('dark-mode') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
+    </script>
 </body>
 </html>
 """
