@@ -1314,37 +1314,82 @@ HTML_TEMPLATE = """
                     'l': 'font-weight: bold;',
                     'm': 'text-decoration: line-through;',
                     'n': 'text-decoration: underline;',
-                    'o': 'font-style: italic;'
+                    'o': 'font-style: italic;',
+                    'k': 'minecraft-obfuscated' // Class for garbled text
                 };
 
                 const parts = motd.split(/(§[0-9a-fk-or])/);
                 let html = '';
-                let closeTags = '';
+                let openSpans = 0;
+                
+                const closeSpans = () => {
+                    while (openSpans > 0) {
+                        html += '</span>';
+                        openSpans--;
+                    }
+                };
 
                 parts.forEach(part => {
                     if (!part) return;
                     if (part.startsWith('§')) {
                         const code = part[1];
                         if (colorMap[code]) {
-                            html += closeTags;
+                            closeSpans();
                             html += `<span style="color: ${colorMap[code]}">`;
-                            closeTags = '</span>';
+                            openSpans++;
                         } else if (styleMap[code]) {
-                            html += `<span style="${styleMap[code]}">`;
-                            closeTags += '</span>';
+                            if (code === 'k') {
+                                html += `<span class="${styleMap[code]}">`;
+                            } else {
+                                html += `<span style="${styleMap[code]}">`;
+                            }
+                            openSpans++;
                         } else if (code === 'r') {
-                            html += closeTags;
-                            closeTags = '';
+                            closeSpans();
                         }
                     } else {
                         // Basic escaping for HTML
-                        const escapedPart = part.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+                        const escapedPart = part.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                         html += escapedPart;
                     }
                 });
 
-                html += closeTags;
+                closeSpans();
                 return html;
+            }
+            
+            function obfuscateText() {
+                // Find all elements that need to be garbled.
+                const elements = document.querySelectorAll('.minecraft-obfuscated');
+                if (elements.length === 0) return; // Exit if there's nothing to do.
+
+                const allowedChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?/~`';
+
+                // Store the original text of each element in a data attribute.
+                // This is needed to know the correct length for the garbled text.
+                elements.forEach(el => {
+                    el.dataset.originalText = el.textContent;
+                });
+
+                // Use a single interval to update all elements at once for better performance.
+                setInterval(() => {
+                    elements.forEach(element => {
+                        const originalText = element.dataset.originalText;
+                        if (!originalText) return;
+
+                        let newText = '';
+                        for (let j = 0; j < originalText.length; j++) {
+                            // Preserve spaces, but garble everything else.
+                            if (originalText[j] === ' ') {
+                                newText += ' ';
+                            } else {
+                                const randomIndex = Math.floor(Math.random() * allowedChars.length);
+                                newText += allowedChars[randomIndex];
+                            }
+                        }
+                        element.textContent = newText;
+                    });
+                }, 50);
             }
 
             const serverItems = document.querySelectorAll('.server-item');
@@ -1392,6 +1437,8 @@ HTML_TEMPLATE = """
                     startListening(serverName);
                 }
             });
+            
+            obfuscateText();
 
             // --- Action Functions ---
             function handleStart(serverName) {
