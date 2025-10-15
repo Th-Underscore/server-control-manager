@@ -27,6 +27,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import gzip
 from datetime import datetime
 import base64
+import re
 
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
@@ -119,7 +120,9 @@ def get_server_properties(server_path):
                     if line and not line.startswith("#"):
                         if "=" in line:
                             key, value = line.split("=", 1)
-                            properties[key.strip()] = value.strip()
+                            # Unescape characters like \:, \=, etc.
+                            value = re.sub(r'\\(.)', r'\1', value.strip())
+                            properties[key.strip()] = value
         except Exception as e:
             print(f"Error reading server.properties for {os.path.basename(server_path)}: {e}")
     return properties
@@ -1020,6 +1023,18 @@ def view_server_log_file(server_name, log_filename):
 
 # --- HTML Templates ---
 
+"""
+            text-shadow:
+                -1px -1px 0 #000,
+                 1px -1px 0 #000,
+                -1px  1px 0 #000,
+                 1px  1px 0 #000,
+                -1px  0   0 #000,
+                 1px  0   0 #000,
+                 0   -1px 0 #000,
+                 0    1px 0 #000;
+"""
+
 # Template for the main control panel
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -1047,7 +1062,13 @@ HTML_TEMPLATE = """
         .server-icon { width: 64px; height: 64px; image-rendering: pixelated; margin-right: 10px; border-radius: 4px; flex-shrink: 0; }
         .server-name-motd { display: flex; flex-direction: column; min-width: 0; /* Allow shrinking */ }
         .server-name { font-weight: bold; }
-        .server-motd { color: #6c757d; font-size: 0.9em; font-family: 'Minecraftia', monospace; white-space: pre-wrap; word-break: break-all; }
+        .server-motd {
+            color: #6c757d;
+            font-size: 0.9em;
+            font-family: 'Minecraftia', monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
         .server-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
         button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
         button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
@@ -1139,10 +1160,10 @@ HTML_TEMPLATE = """
         document.addEventListener('DOMContentLoaded', () => {
             function parseMotd(motd) {
                 const colorMap = {
-                    '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
-                    '4': '#AA0000', '5': '#AA00AA', '6': '#FFAA00', '7': '#AAAAAA',
-                    '8': '#555555', '9': '#5555FF', 'a': '#55FF55', 'b': '#55FFFF',
-                    'c': '#FF5555', 'd': '#FF55FF', 'e': '#FFFF55', 'f': '#FFFFFF'
+                    '0': '#000000', '1': '#000077', '2': '#007700', '3': '#007777',
+                    '4': '#770000', '5': '#770077', '6': '#BB7700', '7': '#777777',
+                    '8': '#383838', '9': '#3838BB', 'a': '#38BB38', 'b': '#38BBBB',
+                    'c': '#BB3838', 'd': '#BB38BB', 'e': '#BBBB38', 'f': '#BBBBBB'
                 };
                 const styleMap = {
                     'l': 'font-weight: bold;',
@@ -1163,10 +1184,6 @@ HTML_TEMPLATE = """
                             html += '</span>'.repeat(openTags.length);
                             openTags = [];
                             const newTag = `<span style="color: ${colorMap[code]}">`;
-                            html += newTag;
-                            openTags.push('</span>');
-                        } else if (styleMap[code]) {
-                            const newTag = `<span style="${styleMap[code]}">`;
                             html += newTag;
                             openTags.push('</span>');
                         } else if (code === 'r') {
