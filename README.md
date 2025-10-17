@@ -57,10 +57,10 @@ Before running the application, you **must** configure the following variables a
 **Optional Configuration:**
 
 *   **`BATCH_FILE_NAME`**: Change if your server startup scripts have a different name (default: `starter.bat`).
-*   **`BACKUPS_DIR`**: Name of the shared directory where backups from individual servers are copied (default: `Backups`). This directory is created within `SERVERS_BASE_DIR`.
+*   **`BACKUPS_DIR`**: Name of the shared directory where backups from individual servers are copied (default: `backups`). This directory is created within `SERVERS_BASE_DIR`.
 *   **`HOST` / `PORT`**: Modify the network interface and port the web server listens on.
 *   **`USERNAME`**: Change the default admin username if desired.
-*   **`SSL_CERT_PATH` / `SSL_KEY_PATH`**: Provide paths to your SSL certificate and key files to enable HTTPS. If these files exist, ensure the `app.run` call at the bottom of `app.py` is the one that includes `ssl_context=ssl_context` (and the other is commented out).
+*   **`SSL_CERT_PATH` / `SSL_KEY_PATH` / `USE_SSL`**: Provide paths to your SSL certificate and key files to enable HTTPS. If these files exist, ensure the `app.run` call at the bottom of `app.py` is the one that includes `ssl_context=ssl_context` (and the other is commented out).
 
 ## Server Folder Structure
 
@@ -76,9 +76,12 @@ SERVERS_BASE_DIR/
 │   │   ├── debug-1.log.gz
 │   │   ├── latest.log
 │   │   └── debug.log
-│   └── backups/     # Optional: Folder for server backups
-│       ├── backup_2024-01-01_1000/
-│       └── backup_2024-01-02_1200/  # Latest backup folder or file will be copied
+│   ├── backups/     # Optional: Folder for server backups (folders or compressed files)
+│   │   ├── backup_2024-01-01_1000/
+│   │   └── backup_2024-01-02_1200/  # Latest backup will be copied
+│   └── public/      # Optional: Folder for public files (accepts symlinks)
+│       ├── mods/  *ref
+│       └── shaderpacks/
 ├── ServerB/
 │   ├── starter.bat
 │   └── ...
