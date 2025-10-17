@@ -32,7 +32,7 @@ import re
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
 
-SERVERS_BASE_DIR = r"C:\\path\\to\\servers"  # !!! IMPORTANT: SET THIS PATH !!!
+SERVERS_BASE_DIR = "C:\\path\\to\\servers"  # !!! IMPORTANT: SET THIS PATH !!!
 BATCH_FILE_NAME = "starter.bat"  # Name of the batch file in each server folder
 BACKUPS_DIR = "Backups"  # Name of the backup directory (relative to SERVERS_BASE_DIR)
 HOST = "0.0.0.0"  # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
