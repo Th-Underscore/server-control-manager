@@ -28,6 +28,8 @@ import gzip
 from datetime import datetime
 import base64
 import re
+import psutil
+from collections import deque
 
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
@@ -49,6 +51,8 @@ SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"  # "C:\\Users\\Me\\server.key"
 USE_SSL = False
 MAX_LOG_LINES = 1000  # Max console lines to keep in memory
+MAX_RESOURCE_HISTORY = 120  # Keep 120 data points (e.g., 2 minutes of data at 1s intervals)
+RESOURCE_MONITOR_INTERVAL = 1  # seconds
 # ---------------------
 
 # --- Global flag to indicate shutdown ---
@@ -56,6 +60,8 @@ shutting_down = False
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
+
+RESOURCE_MONITOR_ENABLED = MAX_RESOURCE_HISTORY > 0 and RESOURCE_MONITOR_INTERVAL > 0
 
 # --- Rate Limiting Setup ---
 limiter = Limiter(
@@ -105,7 +111,7 @@ def load_user(user_id):
 # In-memory storage for running processes and their output
 running_processes = (
     {}
-)  # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False, 'graceful_stop_timer': None} }
+)  # { 'server_name': {'process': Popen_object, 'output': ['line1', 'line2'], 'lock': threading.Lock(), 'stop_requested': False, 'graceful_stop_timer': None, 'resources': {'cpu': deque(), 'ram': deque()}} }
 
 
 def get_server_properties(server_path):
@@ -387,6 +393,8 @@ def index():
         server_status=server_status,
         server_details=server_details,
         username=current_user.username,
+        resource_monitor_interval=RESOURCE_MONITOR_INTERVAL,
+        resource_monitor_enabled=RESOURCE_MONITOR_ENABLED,
     )
 
 
@@ -455,9 +463,18 @@ def start_server(server_name):
             "output": [f"STY:marker:--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
             "lock": new_lock,
             "stop_requested": False,
+            "resources": { # Initialize with empty deques
+                'cpu': deque(maxlen=MAX_RESOURCE_HISTORY),
+                'ram': deque(maxlen=MAX_RESOURCE_HISTORY)
+            }
         }
         thread = threading.Thread(target=read_process_output, args=(server_name, process), daemon=True)
         thread.start()
+
+        # Start resource monitoring thread
+        if MAX_RESOURCE_HISTORY > 0 and RESOURCE_MONITOR_INTERVAL > 0:
+            resource_thread = threading.Thread(target=monitor_process_resources, args=(server_name, process.pid), daemon=True)
+            resource_thread.start()
 
         print(f"Started process for {server_name} with PID: {process.pid}")
 
@@ -714,6 +731,95 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": f"Error sending command: {e}"}), 500
 
 
+def monitor_process_resources(server_name, pid):
+    """Monitors CPU and RAM usage for a given process PID and all its children."""
+    global running_processes
+    try:
+        parent_proc = psutil.Process(pid)
+        # Store Process objects to maintain the state required for cpu_percent(interval=None)
+        tracked_procs = {}
+
+        while server_name in running_processes and running_processes[server_name].get("process"):
+            process_info = running_processes[server_name]
+            if not parent_proc.is_running() or process_info["process"].poll() is not None:
+                break
+
+            total_cpu_usage = 0
+            total_ram_usage_bytes = 0
+            
+            current_procs_in_tree: dict[str, psutil.Process] = {}
+            try:
+                # Get all processes in the tree for this polling cycle
+                all_procs_list = [parent_proc] + parent_proc.children(recursive=True)
+                for p in all_procs_list:
+                    current_procs_in_tree[p.pid] = p
+            except psutil.NoSuchProcess:
+                break
+
+            # Add newly spawned processes to our tracking dictionary and initialize them
+            for pid, proc in current_procs_in_tree.items():
+                if pid not in tracked_procs:
+                    proc.cpu_percent(interval=None)  # First call is for initialization
+                    tracked_procs[pid] = proc
+            
+            # Remove processes that have terminated
+            for pid in list(tracked_procs.keys()):
+                if pid not in current_procs_in_tree:
+                    del tracked_procs[pid]
+
+            # Calculate total resource usage from our tracked, stateful Process objects
+            for pid, proc in tracked_procs.items():
+                try:
+                    if proc.is_running():
+                        total_cpu_usage += proc.cpu_percent(interval=None)
+                        total_ram_usage_bytes += proc.memory_info().rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            with process_info["lock"]:
+                timestamp = time.time() * 1000 # Use milliseconds for JS charts
+                if 'resources' not in process_info:
+                    process_info['resources'] = {
+                        'cpu': deque(maxlen=MAX_RESOURCE_HISTORY),
+                        'ram': deque(maxlen=MAX_RESOURCE_HISTORY)
+                    }
+                process_info['resources']['cpu'].append((timestamp, total_cpu_usage))
+                process_info['resources']['ram'].append((timestamp, total_ram_usage_bytes))
+
+            time.sleep(RESOURCE_MONITOR_INTERVAL)
+    except psutil.NoSuchProcess:
+        print(f"Resource monitor for {server_name} (PID: {pid}) exiting: Process not found.")
+    except Exception as e:
+        print(f"Error in resource monitor for {server_name} (PID: {pid}): {e}")
+    finally:
+        print(f"Resource monitoring thread finished for {server_name}")
+
+
+@app.route("/resources/<server_name>")
+@login_required
+@limiter.exempt
+def get_resource_usage(server_name):
+    """Returns the latest and historical resource usage for a server."""
+    if server_name not in running_processes:
+        return jsonify({"status": "error", "message": "Server not running or not found."}), 404
+
+    process_info = running_processes.get(server_name)
+    if not process_info or 'resources' not in process_info:
+        return jsonify({"cpu": {"latest": 0, "history": []}, "ram": {"latest": 0, "history": []}})
+
+    with process_info["lock"]:
+        cpu_history = list(process_info['resources']['cpu'])
+        ram_history = list(process_info['resources']['ram'])
+
+    latest_cpu = cpu_history[-1][1] if cpu_history else 0
+    latest_ram = ram_history[-1][1] if ram_history else 0
+
+    return jsonify({
+        "cpu": {"latest": latest_cpu, "history": cpu_history},
+        "ram": {"latest": latest_ram, "history": ram_history}
+    })
+
+
 def get_human_readable_size(size, decimal_places=2):
     """Converts a size in bytes to a human-readable format."""
     if size is None:
@@ -833,7 +939,7 @@ PUBLIC_FILES_LIST_TEMPLATE = """
                 {% for dir in directories %}
                 <tr>
                     <td colspan="3">
-                         <a href="{{ url_for('list_public_files', server_name=server_name, subpath=dir.path) }}">
+                        <a href="{{ url_for('list_public_files', server_name=server_name, subpath=dir.path) }}">
                             <span class="icon">&#128193;</span>{{ dir.name }}/
                         </a>
                     </td>
@@ -843,7 +949,7 @@ PUBLIC_FILES_LIST_TEMPLATE = """
                 <tr>
                     <td>
                         <a href="{{ url_for('download_public_file', server_name=server_name, path=file.path) }}" target="_blank">
-                           <span class="icon">&#128196;</span>{{ file.name }}
+                        <span class="icon">&#128196;</span>{{ file.name }}
                         </a>
                     </td>
                     <td>{{ file.size_human }}</td>
@@ -1032,7 +1138,7 @@ SERVER_LOGS_LIST_TEMPLATE = """
 <body>
     <div class="navbar">
         <div class="left-nav">
-             <span>Server Manager - Logs for {{ server_name }}</span>
+            <span>Server Manager - Logs for {{ server_name }}</span>
         </div>
         <div class="right-nav">
             <a href="{{ url_for('index') }}">Main Panel</a>
@@ -1214,7 +1320,7 @@ SERVER_LOG_VIEW_TEMPLATE = """
         </div>
         <a href="{{ url_for('list_server_logs_default', server_name=server_name) }}" class="back-link">Back to {{ server_name }} Log List</a>
     </div>
-     <script>
+    <script>
         document.getElementById('theme-toggle').addEventListener('click', () => {
             const html = document.documentElement;
             html.classList.toggle('dark-mode');
@@ -1381,6 +1487,8 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Server Control Panel</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
         // Apply theme immediately to prevent flashing
         (function() {
@@ -1487,6 +1595,12 @@ HTML_TEMPLATE = """
         button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .dark-mode button:disabled { background-color: #555; color: #aaa; }
         .status { font-style: italic; color: var(--status-text); font-size: 0.9em; min-width: 80px; text-align: right; }
+        .resource-monitor { background-color: rgba(0,0,0,0.1); padding: 5px 10px; border-radius: 4px; margin-top: 10px; cursor: pointer; transition: background-color 0.2s; }
+        .dark-mode .resource-monitor { background-color: rgba(255,255,255,0.05); }
+        .resource-monitor:hover { background-color: rgba(0,0,0,0.2); }
+        .dark-mode .resource-monitor:hover { background-color: rgba(255,255,255,0.1); }
+        .resource-item { display: inline-block; margin-right: 15px; font-size: 0.9em; }
+        .resource-graph-container { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: none; }
         .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
@@ -1503,7 +1617,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="navbar">
         <div class="left-nav">
-             <span>Server Manager</span>
+            <span>Server Manager</span>
         </div>
         <div class="right-nav">
             <span>Welcome, {{ username }}!</span>
@@ -1538,6 +1652,12 @@ HTML_TEMPLATE = """
                                 <span class="server-name">{{ server }}</span>
                                 <span class="server-motd" data-motd="{{ server_details[server]['motd'] }}">{{ server_details[server]['motd'] }}</span>
                             </div>
+                            {% if resource_monitor_enabled %}
+                            <div class="resource-monitor" id="resource-monitor-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
+                                <span class="resource-item">CPU: <b id="cpu-{{ server }}">0.0</b>%</span>
+                                <span class="resource-item">RAM: <b id="ram-{{ server }}">0 MB</b></span>
+                            </div>
+                            {% endif %}
                         </div>
                         <div class="server-actions">
                             <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
@@ -1559,6 +1679,11 @@ HTML_TEMPLATE = """
                         </div>
                         <button class="scroll-to-bottom" id="scroll-{{ server }}">&darr;</button>
                     </div>
+                    {% if resource_monitor_enabled %}
+                    <div class="resource-graph-container" id="resource-graph-container-{{ server }}">
+                        <canvas id="resource-chart-{{ server }}"></canvas>
+                    </div>
+                    {% endif %}
                 </li>
                 {% endfor %}
             {% else %}
@@ -1568,6 +1693,8 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        const RESOURCE_MONITOR_INTERVAL = {{ resource_monitor_interval }};
+
         // --- Theme Toggle ---
         document.getElementById('theme-toggle').addEventListener('click', () => {
             const html = document.documentElement;
@@ -1668,7 +1795,18 @@ HTML_TEMPLATE = """
             }
 
             const serverItems = document.querySelectorAll('.server-item');
-            let eventSources = {}; // Store EventSource objects { server_name: eventSource }
+            let eventSources = {}; // SSE
+            let resourceIntervals = {}; // Resource monitoring
+            let resourceCharts = {};
+
+            function formatBytes(bytes, decimals = 2) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const dm = decimals < 0 ? 0 : decimals;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+            }
 
             serverItems.forEach(item => {
                 const motdElement = item.querySelector('.server-motd');
@@ -1686,14 +1824,21 @@ HTML_TEMPLATE = """
                 const commandInput = item.querySelector('.command-input');
                 const commandPasswordInput = item.querySelector('.command-password-input');
                 const commandButton = item.querySelector('.command-button');
+                const resourceMonitor = item.querySelector('.resource-monitor');
 
 
                 // --- Event Handlers ---
                 startButton.addEventListener('click', () => handleStart(serverName));
                 stopButton.addEventListener('click', () => handleStop(serverName));
                 forceStopButton.addEventListener('click', () => handleForceStop(serverName));
-                if (commandButton) { // Ensure command button exists
+                if (commandButton) {
                     commandButton.addEventListener('click', () => handleSendCommand(serverName));
+                }
+                if (resourceMonitor) {
+                    resourceMonitor.addEventListener('click', () => {
+                        const graphContainer = document.getElementById(`resource-graph-container-${serverName}`);
+                        graphContainer.style.display = graphContainer.style.display === 'none' ? 'block' : 'none';
+                    });
                 }
 
 
@@ -1722,7 +1867,7 @@ HTML_TEMPLATE = """
                 fetch(`/start/${serverName}`, { method: 'POST' })
                     .then(response => {
                         if (!response.ok) {
-                             return response.json().then(err => { throw new Error(err.message || `HTTP error ${response.status}`) });
+                            return response.json().then(err => { throw new Error(err.message || `HTTP error ${response.status}`) });
                         }
                         return response.json();
                     })
@@ -1846,9 +1991,101 @@ HTML_TEMPLATE = """
                     // Re-enable button only if server is still running
                     const statusSpan = document.getElementById(`status-${serverName}`);
                     if (statusSpan && (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Starting...')) {
-                         commandButton.disabled = false;
+                        commandButton.disabled = false;
                     }
                 });
+            }
+
+            function startResourceMonitor(serverName) {
+                const cpuElement = document.getElementById(`cpu-${serverName}`);
+                const ramElement = document.getElementById(`ram-${serverName}`);
+                const ctx = document.getElementById(`resource-chart-${serverName}`).getContext('2d');
+
+                const chartConfig = {
+                    type: 'line',
+                    data: {
+                        datasets: [{
+                            label: 'CPU (%)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            yAxisID: 'yCpu',
+                            tension: 0.1,
+                            data: []
+                        }, {
+                            label: 'RAM (MB)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            yAxisID: 'yRam',
+                            tension: 0.1,
+                            data: []
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        animation: false,
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'minute',
+                                    displayFormats: {
+                                        minute: 'HH:mm:ss'
+                                    }
+                                },
+                                ticks: { color: document.documentElement.classList.contains('dark-mode') ? '#e0e0e0' : '#333' }
+                            },
+                            yCpu: {
+                                position: 'left',
+                                title: { display: true, text: 'CPU (%)', color: document.documentElement.classList.contains('dark-mode') ? '#e0e0e0' : '#333' },
+                                ticks: { color: 'rgba(255, 99, 132, 1)' }
+                            },
+                            yRam: {
+                                position: 'right',
+                                title: { display: true, text: 'RAM (MB)', color: document.documentElement.classList.contains('dark-mode') ? '#e0e0e0' : '#333' },
+                                ticks: { color: 'rgba(54, 162, 235, 1)' },
+                                grid: { drawOnChartArea: false }
+                            }
+                        },
+                        elements: {
+                            point: {
+                                radius: 0
+                            }
+                        },
+                        plugins: {
+                            legend: { labels: { color: document.documentElement.classList.contains('dark-mode') ? '#e0e0e0' : '#333' } }
+                        }
+                    }
+                };
+
+                if (resourceCharts[serverName]) {
+                    resourceCharts[serverName].destroy();
+                }
+                resourceCharts[serverName] = new Chart(ctx, chartConfig);
+
+                const fetchData = () => {
+                    fetch(`/resources/${serverName}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'error') {
+                                console.error(`Resource fetch error for ${serverName}:`, data.message);
+                                return;
+                            }
+                            cpuElement.textContent = data.cpu.latest.toFixed(1);
+                            ramElement.textContent = formatBytes(data.ram.latest);
+
+                            const chart = resourceCharts[serverName];
+                            if (chart) {
+                                chart.data.datasets[0].data = data.cpu.history.map(d => ({ x: d[0], y: d[1] }));
+                                chart.data.datasets[1].data = data.ram.history.map(d => ({ x: d[0], y: d[1] / (1024*1024) })); // Convert to MB
+                                chart.update('quiet');
+                            }
+                        })
+                        .catch(error => console.error(`Error fetching resources for ${serverName}:`, error));
+                };
+
+                fetchData(); // Initial fetch
+                if (resourceIntervals[serverName]) clearInterval(resourceIntervals[serverName]);
+                resourceIntervals[serverName] = setInterval(fetchData, RESOURCE_MONITOR_INTERVAL * 1000);
             }
 
             // --- Server-Sent Events (SSE) ---
@@ -1857,6 +2094,9 @@ HTML_TEMPLATE = """
                 stopListening(serverName);
 
                 console.log(`Opening SSE connection for ${serverName}`);
+                {% if resource_monitor_enabled %}
+                startResourceMonitor(serverName);
+                {% endif %}
                 const outputArea = document.getElementById(`output-${serverName}`);
                 const outputTitle = outputArea.querySelector('.output-title');
                 outputArea.style.display = 'block'; // Show output area
@@ -1870,18 +2110,18 @@ HTML_TEMPLATE = """
                 let userHasScrolled = false;
 
                 outputArea.addEventListener('scroll', () => {
-                   // If user scrolls up, disable auto-scrolling and show the button
-                   const isAtBottom = outputArea.scrollHeight - outputArea.clientHeight <= outputArea.scrollTop + 1;
-                   const scrollToBottomButton = document.getElementById(`scroll-${serverName}`);
+                    // If user scrolls up, disable auto-scrolling and show the button
+                    const isAtBottom = outputArea.scrollHeight - outputArea.clientHeight <= outputArea.scrollTop + 1;
+                    const scrollToBottomButton = document.getElementById(`scroll-${serverName}`);
                    
-                   if (!isAtBottom) {
-                       userHasScrolled = true;
-                       scrollToBottomButton.style.display = 'block';
-                   } else {
-                       // If user scrolls back to the bottom, re-enable auto-scrolling
-                       userHasScrolled = false;
-                       scrollToBottomButton.style.display = 'none';
-                   }
+                    if (!isAtBottom) {
+                        userHasScrolled = true;
+                        scrollToBottomButton.style.display = 'block';
+                    } else {
+                        // If user scrolls back to the bottom, re-enable auto-scrolling
+                        userHasScrolled = false;
+                        scrollToBottomButton.style.display = 'none';
+                    }
                 });
 
                 es.addEventListener('message', event => {
@@ -1926,10 +2166,10 @@ HTML_TEMPLATE = """
                     updateUI(serverName, (status === 'finished' || status === 'stopped' || status === 'not found') ? 'stopped' : 'running', event.data);
                 });
 
-                 es.addEventListener('close', event => {
+                es.addEventListener('close', event => {
                     console.log(`SSE stream closed by server for ${serverName}: ${event.data}`);
                     stopListening(serverName);
-                 });
+                });
 
 
                 es.onerror = (err) => {
@@ -1937,7 +2177,7 @@ HTML_TEMPLATE = """
                     // Update UI to reflect potential stopped state if connection is lost abruptly
                     const statusSpan = document.getElementById(`status-${serverName}`);
                     if (statusSpan && statusSpan.textContent !== 'Stopped' && statusSpan.textContent !== 'Finished') {
-                       updateUI(serverName, 'stopped', 'Comms Error');
+                        updateUI(serverName, 'stopped', 'Comms Error');
                     }
                     stopListening(serverName);
                 };
@@ -1948,6 +2188,15 @@ HTML_TEMPLATE = """
                     console.log(`Closing SSE connection for ${serverName}`);
                     eventSources[serverName].close();
                     delete eventSources[serverName];
+                }
+                if (resourceIntervals[serverName]) {
+                    console.log(`Stopping resource monitor for ${serverName}`);
+                    clearInterval(resourceIntervals[serverName]);
+                    delete resourceIntervals[serverName];
+                }
+                if (resourceCharts[serverName]) {
+                    // The chart is intentionally left in its final state.
+                    // The polling interval is cleared, so it will no longer update.
                 }
             }
 
@@ -1965,6 +2214,8 @@ HTML_TEMPLATE = """
                 const commandButton = item.querySelector('.command-button');
                 const commandInput = item.querySelector('.command-input');
                 const commandPasswordInput = item.querySelector('.command-password-input');
+                const resourceMonitor = item.querySelector('.resource-monitor');
+                const resourceGraphContainer = item.querySelector('.resource-graph-container');
 
 
                 statusSpan.textContent = statusText;
@@ -1979,6 +2230,7 @@ HTML_TEMPLATE = """
                         if(commandButton) commandButton.disabled = false;
                         if(commandInput) commandInput.disabled = false;
                         if(commandPasswordInput) commandPasswordInput.disabled = false;
+                        if(resourceMonitor) resourceMonitor.style.display = 'block';
                         break;
                     case 'stopped':
                         startButton.disabled = false;
@@ -1988,6 +2240,8 @@ HTML_TEMPLATE = """
                         if(commandButton) commandButton.disabled = true;
                         if(commandInput) commandInput.disabled = true;
                         if(commandPasswordInput) commandPasswordInput.disabled = true;
+                        // Keep the resource monitor and graph visible in their last state.
+                        // The user can still interact with them (e.g., close the graph).
                         // Keep output area visible after run
                         break;
                     case 'starting':
@@ -2019,7 +2273,7 @@ LOGIN_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Server Control Panel</title>
-     <script>
+    <script>
         // Apply theme immediately to prevent flashing
         (function() {
             const theme = localStorage.getItem('theme') || 'light';

@@ -2,4 +2,5 @@ Flask
 Flask-Login
 Flask-Limiter
 Werkzeug
-dotenv
+python-dotenv
+psutil
