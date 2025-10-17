@@ -11,8 +11,10 @@ A simple web-based control panel built with Flask to manage and monitor server p
     *   **Real-time Output:** Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
     *   **Command Execution:** Send commands directly to the stdin of running server processes (requires a command password).
     *   **Logs:** View each and every server's log files.
+    *   **Public Files:** Serve files and directories from the server's public folder.
     *   **Authentication:** Secure login system using Flask-Login to protect access.
     *   **SSL Support:** Optional SSL/TLS encryption for secure connections (requires certificate and key files).
+    *   **Pretty UI:** Clean and responsive design, including server icons (`server-icon.png`) and MOTD subheaders (`server.properties`).
 *   **Backup Copy:** Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
 *   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
@@ -129,4 +131,34 @@ SERVERS_BASE_DIR/
 
 ## To-Do
 
-*   Add support for automatically finding an open port for each process
+*   User manager (multiple users with different permissions)
+    *   Make command password optional
+    *   Add option for start/stop password
+    *   Hide certain actions/views based on permissions (start, stop, console, logs, etc.)
+    *   Per-server permissions
+*   UI improvements
+    *   Option to disable §k rendering or text formatting completely
+    *   Option for max console output history length
+    *   Option to disable server icon and/or MOTD
+    *   Option for custom CSS
+    *   Option for custom favicon
+    *   Search/filter for the live console output
+    *   "Restart" button
+    *   Settings page in the UI
+*   Add support for Unix
+*   Refactoring
+    *   Separate HTML, CSS, and JS into their own files
+    *   Move configuration variables into a dedicated file (e.g., `config.ini`)
+    *   Break into smaller modules using Flask Blueprints (e.g., for auth, server management, API)
+*   Persist server state (e.g., PID files) to allow the panel to reconnect to processes that are still running after a panel restart
+*   Feature enhancements
+    *   Add output logging for inputted commands
+    *   Upgrade backup management (e.g., daily, monthly, etc.; delete old ones, etc.)
+    *   Add a server configuration editor (e.g., for `server.properties`)
+    *   Implement pagination/streaming for viewing large log files to reduce memory usage
+    *   Add a file manager for server directories with upload/delete capabilities
+    *   Add a "Restore Backup" feature in the UI
+    *   Implement scheduled tasks (e.g., daily restarts, timed commands)
+    *   Add API endpoints for programmatic control (e.g., webhooks)
+*   Add resource monitoring (CPU/RAM) for each server process
+*   Add a proper logging setup for the control panel application itself (separate from per-server logs)
