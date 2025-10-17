@@ -16,6 +16,8 @@ A simple web-based control panel built with Flask to manage and monitor server p
 *   **Backup Copy:** Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
 *   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
+*Warning*: Keep your paths secure! Console output and logs _will_ contain the path to the server folder. Consider running this in a VM or container.
+
 ## Requirements
 
 *   Python 3.x
@@ -43,8 +45,8 @@ Before running the application, you **must** configure the following variables a
     *   These can be set directly in `app.py` as fallback values.
     *   **Recommended**: Create a `.env` file in the same directory as `app.py` and define them there for better security and easier management:
         ```env
-        PASSWORD="your_strong_admin_password"
-        CMD_PASSWORD="your_strong_command_password"
+        PASSWORD=your_strong_admin_password
+        CMD_PASSWORD=your_strong_command_password
         ```
     *   If `.env` is used, the values in `app.py` will be overridden. **Change the default passwords!**
 3.  **`SECRET_KEY`**: For production or persistent sessions, set the `FLASK_SECRET_KEY` environment variable or replace the `secrets.token_hex(24)` call with a fixed, strong, secret string.
@@ -120,6 +122,7 @@ SERVERS_BASE_DIR/
 ## Security Notes
 
 *   **Change the default password immediately!**
+*   **This application is not intended for production use and is provided "as is."** Edits will have to be made to fit your specific needs.
 *   Keep your `SECRET_KEY` confidential.
 *   Run this application on a trusted network. If exposing it externally, ensure proper firewall rules and consider using a production-grade WSGI server (like Gunicorn or Waitress) behind a reverse proxy (like Nginx or Apache) instead of the Flask development server.
 *   Enable SSL/TLS for encrypted communication, especially if accessed over untrusted networks.
