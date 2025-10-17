@@ -1,11 +1,19 @@
+import base64
+from collections import deque
+import gzip
+import json
 import os
+import re
+import secrets
+import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
-import shutil
-import secrets
-import signal
-import sys
+from datetime import datetime
+
+import psutil
 from dotenv import load_dotenv
 from flask import (
     Flask,
@@ -24,12 +32,6 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash, check_password_hash
-import gzip
-from datetime import datetime
-import base64
-import re
-import psutil
-from collections import deque
 
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
@@ -395,6 +397,7 @@ def index():
         username=current_user.username,
         resource_monitor_interval=RESOURCE_MONITOR_INTERVAL,
         resource_monitor_enabled=RESOURCE_MONITOR_ENABLED,
+        max_resource_history=MAX_RESOURCE_HISTORY,
     )
 
 
@@ -652,12 +655,27 @@ def stream_output(server_name):
     def generate_output():
         last_index = 0
         process_info = running_processes[server_name]
+        last_resource_timestamp_sent = 0
 
         last_sent_time = time.time()
         while True:
+            resource_payload = None
             with process_info["lock"]:
                 current_len = len(process_info["output"])
                 new_lines = process_info["output"][last_index:current_len]
+
+                if RESOURCE_MONITOR_ENABLED:
+                    cpu_deque = process_info.get("resources", {}).get("cpu")
+                    if cpu_deque:
+                        latest_timestamp, latest_cpu = cpu_deque[-1]
+                        if latest_timestamp > last_resource_timestamp_sent:
+                            ram_deque = process_info.get("resources", {}).get("ram", [])
+                            latest_ram = 0
+                            if ram_deque and ram_deque[-1][0] == latest_timestamp:
+                                latest_ram = ram_deque[-1][1]
+                            resource_payload = json.dumps({"cpu": latest_cpu, "ram": latest_ram, "timestamp": latest_timestamp})
+                            last_resource_timestamp_sent = latest_timestamp
+
                 # Check process status *inside* the lock to ensure consistency with output read
                 process_obj = process_info.get("process")
                 process_running = process_obj is not None and process_obj.poll() is None
@@ -668,7 +686,12 @@ def stream_output(server_name):
                     yield f"event: message\ndata: {line}\n\n"
                 last_index = current_len
                 last_sent_time = time.time()
-            elif time.time() - last_sent_time > 10:
+
+            if resource_payload:
+                yield f"event: resources\ndata: {resource_payload}\n\n"
+                last_sent_time = time.time()
+
+            if not new_lines and not resource_payload and time.time() - last_sent_time > 10:
                 yield ":heartbeat\n\n"
                 last_sent_time = time.time()
 
@@ -1694,6 +1717,7 @@ HTML_TEMPLATE = """
 
     <script>
         const RESOURCE_MONITOR_INTERVAL = {{ resource_monitor_interval }};
+        const MAX_RESOURCE_HISTORY = {{ max_resource_history }};
 
         // --- Theme Toggle ---
         document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -2062,30 +2086,31 @@ HTML_TEMPLATE = """
                 }
                 resourceCharts[serverName] = new Chart(ctx, chartConfig);
 
-                const fetchData = () => {
-                    fetch(`/resources/${serverName}`)
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.status === 'error') {
-                                console.error(`Resource fetch error for ${serverName}:`, data.message);
-                                return;
-                            }
-                            cpuElement.textContent = data.cpu.latest.toFixed(1);
-                            ramElement.textContent = formatBytes(data.ram.latest);
+                // Clear any old polling interval, just in case.
+                if (resourceIntervals[serverName]) {
+                    clearInterval(resourceIntervals[serverName]);
+                    delete resourceIntervals[serverName];
+                }
 
-                            const chart = resourceCharts[serverName];
-                            if (chart) {
-                                chart.data.datasets[0].data = data.cpu.history.map(d => ({ x: d[0], y: d[1] }));
-                                chart.data.datasets[1].data = data.ram.history.map(d => ({ x: d[0], y: d[1] / (1024*1024) })); // Convert to MB
-                                chart.update('quiet');
-                            }
-                        })
-                        .catch(error => console.error(`Error fetching resources for ${serverName}:`, error));
-                };
+                // Fetch initial history once. Live updates will come from SSE.
+                fetch(`/resources/${serverName}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'error') {
+                            console.error(`Resource fetch error for ${serverName}:`, data.message);
+                            return;
+                        }
+                        cpuElement.textContent = data.cpu.latest.toFixed(1);
+                        ramElement.textContent = formatBytes(data.ram.latest);
 
-                fetchData(); // Initial fetch
-                if (resourceIntervals[serverName]) clearInterval(resourceIntervals[serverName]);
-                resourceIntervals[serverName] = setInterval(fetchData, RESOURCE_MONITOR_INTERVAL * 1000);
+                        const chart = resourceCharts[serverName];
+                        if (chart) {
+                            chart.data.datasets[0].data = data.cpu.history.map(d => ({ x: d[0], y: d[1] }));
+                            chart.data.datasets[1].data = data.ram.history.map(d => ({ x: d[0], y: d[1] / (1024*1024) })); // Convert to MB
+                            chart.update('quiet');
+                        }
+                    })
+                    .catch(error => console.error(`Error fetching resources for ${serverName}:`, error));
             }
 
             // --- Server-Sent Events (SSE) ---
@@ -2121,6 +2146,34 @@ HTML_TEMPLATE = """
                         // If user scrolls back to the bottom, re-enable auto-scrolling
                         userHasScrolled = false;
                         scrollToBottomButton.style.display = 'none';
+                    }
+                });
+
+                es.addEventListener('resources', event => {
+                    const data = JSON.parse(event.data);
+                    const cpuElement = document.getElementById(`cpu-${serverName}`);
+                    const ramElement = document.getElementById(`ram-${serverName}`);
+
+                    if (cpuElement) cpuElement.textContent = data.cpu.toFixed(1);
+                    if (ramElement) ramElement.textContent = formatBytes(data.ram);
+
+                    const chart = resourceCharts[serverName];
+                    if (chart) {
+                        const datasetCpu = chart.data.datasets[0].data;
+                        const datasetRam = chart.data.datasets[1].data;
+
+                        datasetCpu.push({ x: data.timestamp, y: data.cpu });
+                        datasetRam.push({ x: data.timestamp, y: data.ram / (1024*1024) }); // Convert to MB
+
+                        // Prune old data points to prevent memory leak and keep chart clean
+                        while (datasetCpu.length > MAX_RESOURCE_HISTORY) {
+                            datasetCpu.shift();
+                        }
+                        while (datasetRam.length > MAX_RESOURCE_HISTORY) {
+                            datasetRam.shift();
+                        }
+
+                        chart.update('quiet');
                     }
                 });
 

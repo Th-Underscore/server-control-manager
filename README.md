@@ -150,6 +150,7 @@ SERVERS_BASE_DIR/
     *   Separate HTML, CSS, and JS into their own files
     *   Move configuration variables into a dedicated file (e.g., `config.ini`)
     *   Break into smaller modules using Flask Blueprints (e.g., for auth, server management, API)
+    *   Add typing
 *   Persist server state (e.g., PID files) to allow the panel to reconnect to processes that are still running after a panel restart
 *   Feature enhancements
     *   Add output logging for inputted commands
@@ -160,5 +161,4 @@ SERVERS_BASE_DIR/
     *   Add a "Restore Backup" feature in the UI
     *   Implement scheduled tasks (e.g., daily restarts, timed commands)
     *   Add API endpoints for programmatic control (e.g., webhooks)
-*   Add resource monitoring (CPU/RAM) for each server process
 *   Add a proper logging setup for the control panel application itself (separate from per-server logs)
