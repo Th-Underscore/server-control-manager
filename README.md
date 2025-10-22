@@ -27,7 +27,7 @@ A simple web-based control panel built with Flask to manage and monitor server p
 
 You can install the required Python packages using pip:
 ```bash
-pip install Flask Flask-Login Flask-Limiter Werkzeug dotenv
+pip install Flask Flask-Login Flask-Limiter Werkzeug python-dotenv psutil
 ```
 or
 ```bash
