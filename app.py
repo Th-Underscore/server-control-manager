@@ -513,6 +513,7 @@ def index():
             "motd": properties.get("motd", "No MOTD found"),
             "version": properties.get("version", ""),
             "icon": icon,
+            "port": properties.get("server-port", "N/A"),
         }
 
     # Pass server status (running or not) to the template
@@ -1761,7 +1762,7 @@ HTML_TEMPLATE = """
         .flash-danger { background-color: var(--flash-danger-bg); color: var(--flash-danger-text); border: 1px solid var(--flash-danger-border); }
         .flash-info { background-color: var(--flash-info-bg); color: var(--flash-info-text); border: 1px solid var(--flash-info-border); }
         .server-list { list-style: none; padding: 0; }
-        .server-item { background: var(--server-item-bg); margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; }
+        .server-item { background: var(--server-item-bg); margin-bottom: 15px; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; gap: 10px; position: relative; }
         .server-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: nowrap; }
         .server-details-container { display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; }
         .server-icon { width: 64px; height: 64px; image-rendering: pixelated; margin-right: 10px; border-radius: 4px; flex-shrink: 0; }
@@ -1804,6 +1805,8 @@ HTML_TEMPLATE = """
         .output-container { position: relative; }
         .scroll-to-bottom { position: absolute; bottom: 10px; right: 10px; background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: none; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
+        .server-port-display { position: absolute; top: 5px; right: 5px; font-size: 0.75em; font-family: monospace; color: var(--status-text); background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; display: none; z-index: 10; }
+        .dark-mode .server-port-display { background-color: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
@@ -1876,6 +1879,7 @@ HTML_TEMPLATE = """
                         <canvas id="resource-chart-{{ server }}"></canvas>
                     </div>
                     {% endif %}
+                    <div class="server-port-display">{{ server_details[server]['port'] }}</div>
                 </li>
                 {% endfor %}
             {% else %}
@@ -2048,6 +2052,8 @@ HTML_TEMPLATE = """
                 // --- Initial State ---
                 if (statusSpan.textContent === 'Running') {
                     startListening(serverName);
+                    const portDisplay = item.querySelector('.server-port-display');
+                    if (portDisplay) portDisplay.style.display = 'block';
                 }
             });
             
@@ -2453,6 +2459,7 @@ HTML_TEMPLATE = """
                 const commandPasswordInput = item.querySelector('.command-password-input');
                 const resourceMonitor = item.querySelector('.resource-monitor');
                 const resourceGraphContainer = item.querySelector('.resource-graph-container');
+                const portDisplay = item.querySelector('.server-port-display');
 
 
                 statusSpan.textContent = statusText;
@@ -2468,6 +2475,7 @@ HTML_TEMPLATE = """
                         if(commandInput) commandInput.disabled = false;
                         if(commandPasswordInput) commandPasswordInput.disabled = false;
                         if(resourceMonitor) resourceMonitor.style.display = 'block';
+                        if(portDisplay) portDisplay.style.display = 'block';
                         break;
                     case 'stopped':
                         startButton.disabled = false;
@@ -2477,6 +2485,7 @@ HTML_TEMPLATE = """
                         if(commandButton) commandButton.disabled = true;
                         if(commandInput) commandInput.disabled = true;
                         if(commandPasswordInput) commandPasswordInput.disabled = true;
+                        if(portDisplay) portDisplay.style.display = 'none';
                         // Keep the resource monitor and graph visible in their last state.
                         // The user can still interact with them (e.g., close the graph).
                         // Keep output area visible after run
@@ -2488,6 +2497,7 @@ HTML_TEMPLATE = """
                         if(commandButton) commandButton.disabled = true;
                         if(commandInput) commandInput.disabled = true;
                         if(commandPasswordInput) commandPasswordInput.disabled = true;
+                        if(portDisplay) portDisplay.style.display = 'block';
                         if(commandSection && state === 'stopping') {
                             // Keep command section visible during stopping if it was already visible
                         } else if (commandSection) {
