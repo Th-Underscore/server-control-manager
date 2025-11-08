@@ -7,6 +7,10 @@ import re
 import secrets
 import shutil
 import signal
+try:
+    import miniupnpc
+except ImportError:
+    miniupnpc = None
 import subprocess
 import sys
 import threading
@@ -36,7 +40,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # --- Configuration ---
 load_dotenv()  # Load from .env file if present
 
-SERVERS_BASE_DIR = "C:\\path\\to\\servers"  # !!! IMPORTANT: SET THIS PATH !!!
+SERVERS_BASE_DIR = "C:\\path\\to\\servers"  # !!! SET THIS PATH !!!
 BATCH_FILE_NAME = "starter.bat"  # Name of the batch file in each server folder
 BACKUPS_DIR = "Backups"  # Name of the backup directory (relative to SERVERS_BASE_DIR)
 HOST = "0.0.0.0"  # Listen on all network interfaces (Change to "127.0.0.1" for local access only)
@@ -55,10 +59,13 @@ USE_SSL = False
 MAX_LOG_LINES = 1000  # Max console lines to keep in memory
 MAX_RESOURCE_HISTORY = 120  # Keep 120 data points (e.g., 2 minutes of data at 1s intervals)
 RESOURCE_MONITOR_INTERVAL = 1  # seconds
+UPNP_ENABLED = False  # Set to True to enable automatic port forwarding. Requires a UPnP/IGD enabled router.
+PORT_RANGE = range(25565, 25575)  # 25565-25574
 # ---------------------
 
 # --- Global flag to indicate shutdown ---
 shutting_down = False
+upnp_mappings = {}  # { 'server_name': port }
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
@@ -149,6 +156,127 @@ def get_server_icon(server_path):
     return None
 
 
+def setup_upnp_port_forwarding(server_name, port_range):
+    """Discovers router, finds an available port, and forwards it."""
+    logs = []
+    if not miniupnpc:
+        return None, logs + ["STY:error:miniupnpc library is not installed. Cannot use UPnP."]
+
+    try:
+        u = miniupnpc.UPnP()
+        u.discoverdelay = 200
+        ndevices = u.discover()
+        if ndevices == 0:
+            return None, logs + ["STY:error:UPnP discovery failed: No IGD found on network."]
+
+        u.selectigd()
+        external_ip = u.externalipaddress()
+        internal_ip = u.lanaddr
+        logs.append(f"STY:log:UPnP device found.")
+
+        for port in port_range:
+            mapping = u.getspecificportmapping(port, 'TCP')
+            if mapping is None:
+                logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
+                try:
+                    u.addportmapping(port, 'TCP', internal_ip, port, f'SCM: {server_name}', '')
+                    logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
+                    upnp_mappings[server_name] = port  # Track the mapping
+                    return port, logs
+                except Exception as e:
+                    logs.append(f"STY:error:Failed to map port {port}: {e}")
+            else:
+                logs.append(f"STY:log:Port {port} is already mapped to {mapping[0]}:{mapping[1]}. Checking next port.")
+
+        return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
+
+    except Exception as e:
+        return None, logs + [f"STY:error:An unexpected UPnP error occurred: {e}"]
+
+def remove_upnp_port_forwarding(port):
+    """Removes a specific port forwarding rule."""
+    logs = []
+    if not miniupnpc:
+        return logs + ["STY:log:miniupnpc library not installed, skipping UPnP cleanup."]
+
+    try:
+        u = miniupnpc.UPnP()
+        u.discoverdelay = 200
+        if u.discover() > 0:
+            u.selectigd()
+            if u.deleteportmapping(port, 'TCP'):
+                logs.append(f"STY:log:Successfully removed UPnP port mapping for port {port}.")
+            else:
+                logs.append(f"STY:error:Failed to remove UPnP port mapping for port {port}. It may not exist.")
+        else:
+            logs.append("STY:error:Could not find UPnP device to remove port mapping.")
+    except Exception as e:
+        logs.append(f"STY:error:An error occurred while removing UPnP mapping for port {port}: {e}")
+    return logs
+
+def cleanup_server_port_mapping(server_name):
+    """Finds and removes the port mapping for a specific server."""
+    if server_name in upnp_mappings:
+        port_to_remove = upnp_mappings[server_name]
+        print(f"Cleaning up UPnP port mapping for {server_name} on port {port_to_remove}...")
+        logs = remove_upnp_port_forwarding(port_to_remove)
+        for log in logs:
+            with running_processes.get(server_name, {}).get("lock", threading.Lock()):
+                 _log_to_server_output(server_name, log)
+        del upnp_mappings[server_name]
+
+
+def update_server_properties_port(server_path, new_port):
+    """Updates the server-port, query.port, and rcon.port in server.properties."""
+    properties_file = os.path.join(server_path, "server.properties")
+    if not os.path.isfile(properties_file):
+        return False, "server.properties not found"
+
+    lines = []
+    try:
+        with open(properties_file, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return False, f"Error reading properties file: {e}"
+
+    new_lines = []
+    keys_to_update = {
+        "server-port": str(new_port),
+        "query.port": str(new_port),
+        "rcon.port": str(new_port + 10),
+    }
+    updated_keys = set()
+
+    for line in lines:
+        stripped_line = line.strip()
+        is_match = False
+        if stripped_line and not stripped_line.startswith("#") and "=" in stripped_line:
+            key = stripped_line.split("=", 1)[0].strip()
+            if key in keys_to_update:
+                new_lines.append(f"{key}={keys_to_update[key]}\n")
+                updated_keys.add(key)
+                is_match = True
+        if not is_match:
+            new_lines.append(line)
+
+    for key, value in keys_to_update.items():
+        if key not in updated_keys:
+            new_lines.append(f"\n{key}={value}\n")
+
+    try:
+        with open(properties_file, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+        return True, f"Ports set to {new_port} (RCON: {new_port + 10})"
+    except Exception as e:
+        # If writing fails, try to restore the original content
+        try:
+            with open(properties_file, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+        except Exception as restore_e:
+            return False, f"Failed to update properties and then failed to restore original file: {restore_e}"
+        return False, f"Error writing updated properties: {e}"
+
+
 # --- Helper Functions (get_server_folders, read_process_output - unchanged from previous version) ---
 def get_server_folders():
     """Finds valid server folders in the base directory."""
@@ -214,6 +342,10 @@ def read_process_output(server_name, process):
             with running_processes[server_name]["lock"]:
                 if not running_processes[server_name]["stop_requested"]:
                     running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED ---")
+
+                    # --- Cleanup Port Mapping ---
+                    cleanup_server_port_mapping(server_name)
+                    # --------------------------
 
                     # --- Backup Copy ---
                     server_path = os.path.join(SERVERS_BASE_DIR, server_name)
@@ -447,6 +579,42 @@ def start_server(server_name):
                 return redirect(url_for("index"))
 
     # --- Start the process (Common logic) ---
+    pre_start_logs = [f"STY:marker:--- Starting {server_name} ({BATCH_FILE_NAME}) ---"]
+
+    # --- UPnP Port Forwarding Logic ---
+    if UPNP_ENABLED:
+        pre_start_logs.append("STY:log:UPnP enabled. Discovering router and finding available port...")
+        found_port, upnp_logs = setup_upnp_port_forwarding(server_name, PORT_RANGE)
+        pre_start_logs.extend(upnp_logs)
+
+        if found_port:
+            pre_start_logs.append(f"STY:log:Using port: {found_port}. Updating server.properties...")
+            success, message = update_server_properties_port(server_path, found_port)
+            if success:
+                pre_start_logs.append(f"STY:log:server.properties updated successfully. {message}")
+            else:
+                # If properties fail to update, we must clean up the port mapping we just created
+                message = f"Failed to update server.properties: {message}"
+                pre_start_logs.append(f"STY:error:{message}")
+                cleanup_server_port_mapping(server_name) # Clean up the new mapping
+                # Abort the start
+                if request.method == "POST":
+                    return jsonify({"status": "error", "message": message}), 500
+                else:
+                    flash(f"Error for '{server_name}': {message}", "danger")
+                    return redirect(url_for("index"))
+        else:
+            # setup_upnp_port_forwarding already logged the error
+            message = "Failed to find and forward a port via UPnP."
+            # Abort the start
+            if request.method == "POST":
+                return jsonify({"status": "error", "message": message}), 500
+            else:
+                flash(f"Error for '{server_name}': {message}", "danger")
+                return redirect(url_for("index"))
+    else:
+        pre_start_logs.append("STY:log:UPnP is disabled. Using port from server.properties.")
+
     try:
         process = subprocess.Popen(
             [batch_path],
@@ -463,13 +631,13 @@ def start_server(server_name):
         new_lock = threading.RLock()
         running_processes[server_name] = {
             "process": process,
-            "output": [f"STY:marker:--- Starting {server_name} ({BATCH_FILE_NAME}) ---"],
+            "output": pre_start_logs,
             "lock": new_lock,
             "stop_requested": False,
-            "resources": { # Initialize with empty deques
-                'cpu': deque(maxlen=MAX_RESOURCE_HISTORY),
-                'ram': deque(maxlen=MAX_RESOURCE_HISTORY)
-            }
+            "resources": {  # Initialize with empty deques
+                "cpu": deque(maxlen=MAX_RESOURCE_HISTORY),
+                "ram": deque(maxlen=MAX_RESOURCE_HISTORY),
+            },
         }
         thread = threading.Thread(target=read_process_output, args=(server_name, process), daemon=True)
         thread.start()
@@ -594,6 +762,7 @@ def _force_kill_process(server_name, process_info):
 
         # Trigger backup on successful forced stop
         if final_status == "stopped":
+            cleanup_server_port_mapping(server_name)
             server_path = os.path.join(SERVERS_BASE_DIR, server_name)
             try:
                 copy_latest_backup(server_name, server_path)
@@ -1884,6 +2053,25 @@ HTML_TEMPLATE = """
             
             obfuscateText();
 
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    console.log('Page is visible again, checking SSE connections.');
+                    document.querySelectorAll('.server-item').forEach(item => {
+                        const serverName = item.id.replace('server-', '');
+                        const statusSpan = item.querySelector('.status');
+
+                        if (statusSpan && (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...' || statusSpan.textContent === 'Starting...')) {
+                            const es = eventSources[serverName];
+                            // 0=CONNECTING, 1=OPEN, 2=CLOSED
+                            if (!es || es.readyState === 2) {
+                                console.log(`SSE connection for ${serverName} is closed or missing. Reconnecting.`);
+                                startListening(serverName);
+                            }
+                        }
+                    });
+                }
+            });
+
             // --- Action Functions ---
             function handleStart(serverName) {
                 console.log(`Starting ${serverName}...`);
@@ -2184,16 +2372,12 @@ HTML_TEMPLATE = """
                     // Check for our special style prefix
                     if (message.startsWith('STY:')) {
                         // Split into parts: "STY", "type", "actual message"
-                        const parts = message.split(':', 3);
-                        if (parts.length === 3) {
-                            const type = parts[1]; // e.g., "stdin", "marker", "error", "log"
-                            const text = parts[2];
-                            line.textContent = text;
-                            line.classList.add(`log-${type}`); // Apply the CSS class
-                        } else {
-                            // Fallback for malformed message
-                            line.textContent = message;
-                        }
+                        const parts = message.split(':');
+                        const type = parts[1]; // e.g., "stdin", "marker", "error", "log"
+                        parts.splice(0, 2);
+                        const text = parts.join(':');
+                        line.textContent = text;
+                        line.classList.add(`log-${type}`); // Apply the CSS class
                     } else {
                         line.textContent = message; // stdout/stderr
                     }
@@ -2501,6 +2685,19 @@ def cleanup_processes():
                     print(f" - Server {server_name} already stopped")
 
     print("All subprocesses handled")
+
+    # --- UPnP Cleanup ---
+    if UPNP_ENABLED and upnp_mappings:
+        print(" - Cleaning up all UPnP port mappings...")
+        all_ports = list(upnp_mappings.values())
+        for port in all_ports:
+            logs = remove_upnp_port_forwarding(port)
+            for log in logs:
+                # Strip the STY prefix for cleaner console logging
+                clean_log = log.split(":", 2)[-1] if log.startswith("STY:") else log
+                print(f"   - {clean_log}")
+        upnp_mappings.clear()
+        print(" - UPnP cleanup complete.")
 
 
 def signal_handler(sig, frame):
