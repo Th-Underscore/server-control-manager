@@ -7,6 +7,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 try:
     import miniupnpc
 except ImportError:
@@ -179,12 +180,29 @@ def setup_upnp_port_forwarding(server_name, port_range):
             if mapping is None:
                 logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
                 try:
-                    u.addportmapping(port, 'TCP', internal_ip, port, f'SCM: {server_name}', '')
+                    u.addportmapping(port, 'TCP', internal_ip, port, f'SCM - {server_name}', '')
                     logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
                     upnp_mappings[server_name] = port  # Track the mapping
                     return port, logs
                 except Exception as e:
-                    logs.append(f"STY:error:Failed to map port {port}: {e}")
+                    # Some routers have a delay in clearing mappings, causing a conflict even when the port appears free
+                    if 'ConflictInMappingEntry' in str(e):
+                        logs.append(f"STY:log:Conflict on port {port} despite it appearing free. Attempting to clear and retry...")
+                        try:
+                            if u.deleteportmapping(port, 'TCP'):
+                                logs.append(f"STY:log:Sent a cleanup request for port {port}. Pausing for router to process...")
+                                time.sleep(2)
+                                # Second attempt
+                                u.addportmapping(port, 'TCP', internal_ip, port, f'SCM - {server_name}', '')
+                                logs.append(f"STY:log:Successfully forwarded port {port} on the second attempt.")
+                                upnp_mappings[server_name] = port
+                                return port, logs
+                            else:
+                                logs.append(f"STY:error:Failed to clear potential ghost mapping on port {port}. It might be in use by another device.")
+                        except Exception as e2:
+                            logs.append(f"STY:error:Failed to map port {port} on retry after conflict: {e2}")
+                    else:
+                        logs.append(f"STY:error:Failed to map port {port}: {e}")
             else:
                 logs.append(f"STY:log:Port {port} is already mapped to {mapping[0]}:{mapping[1]}. Checking next port.")
 
@@ -216,14 +234,13 @@ def remove_upnp_port_forwarding(port):
 
 def cleanup_server_port_mapping(server_name):
     """Finds and removes the port mapping for a specific server."""
-    if server_name in upnp_mappings:
-        port_to_remove = upnp_mappings[server_name]
+    port_to_remove = upnp_mappings.pop(server_name, None)
+    if port_to_remove:
         print(f"Cleaning up UPnP port mapping for {server_name} on port {port_to_remove}...")
         logs = remove_upnp_port_forwarding(port_to_remove)
         for log in logs:
             with running_processes.get(server_name, {}).get("lock", threading.Lock()):
-                 _log_to_server_output(server_name, log)
-        del upnp_mappings[server_name]
+                _log_to_server_output(server_name, log)
 
 
 def update_server_properties_port(server_path, new_port):
@@ -340,23 +357,28 @@ def read_process_output(server_name, process):
         # Safely update status if the process entry still exists
         if server_name in running_processes:
             with running_processes[server_name]["lock"]:
+                if running_processes[server_name].get("process") is None:
+                    return
+
                 if not running_processes[server_name]["stop_requested"]:
-                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED ---")
+                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED UNEXPECTEDLY ---")
+                else:
+                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT STOPPED ---")
 
-                    # --- Cleanup Port Mapping ---
-                    cleanup_server_port_mapping(server_name)
-                    # --------------------------
+                print(f"Process for {server_name} has exited. Running cleanup from output thread...")
 
-                    # --- Backup Copy ---
-                    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-                    try:
-                        copy_latest_backup(server_name, server_path)
-                    except Exception as backup_e:
-                        print(f"Critical error calling backup function for {server_name}: {backup_e}")
-                    # --------------------
+                # 1. Cleanup Port Mapping
+                cleanup_server_port_mapping(server_name)
 
-                    print(f"Process for {server_name} exited.")
-                    running_processes[server_name]["process"] = None
+                # 2. Backup Copy
+                server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+                try:
+                    copy_latest_backup(server_name, server_path)
+                except Exception as backup_e:
+                    print(f"Critical error calling backup function for {server_name}: {backup_e}")
+
+                print(f"Cleanup for {server_name} complete.")
+                running_processes[server_name]["process"] = None
 
 
 # --- Backup Helper ---
@@ -594,20 +616,16 @@ def start_server(server_name):
             if success:
                 pre_start_logs.append(f"STY:log:server.properties updated successfully. {message}")
             else:
-                # If properties fail to update, we must clean up the port mapping we just created
                 message = f"Failed to update server.properties: {message}"
                 pre_start_logs.append(f"STY:error:{message}")
-                cleanup_server_port_mapping(server_name) # Clean up the new mapping
-                # Abort the start
+                cleanup_server_port_mapping(server_name)
                 if request.method == "POST":
                     return jsonify({"status": "error", "message": message}), 500
                 else:
                     flash(f"Error for '{server_name}': {message}", "danger")
                     return redirect(url_for("index"))
         else:
-            # setup_upnp_port_forwarding already logged the error
-            message = "Failed to find and forward a port via UPnP."
-            # Abort the start
+            message = f"Failed to find and forward a port via UPnP: {upnp_logs[-1]}."
             if request.method == "POST":
                 return jsonify({"status": "error", "message": message}), 500
             else:
