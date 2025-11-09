@@ -157,8 +157,14 @@ def get_server_icon(server_path):
     return None
 
 
+def is_port_in_use(port):
+    """Checks if a local port is already in use."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('127.0.0.1', port)) == 0
+
+
 def setup_upnp_port_forwarding(server_name, port_range):
-    """Discovers router, finds an available port, and forwards it."""
+    """Discovers router, enumerates all mappings, finds an available port, and forwards it."""
     logs = []
     if not miniupnpc:
         return None, logs + ["STY:error:miniupnpc library is not installed. Cannot use UPnP."]
@@ -166,45 +172,48 @@ def setup_upnp_port_forwarding(server_name, port_range):
     try:
         u = miniupnpc.UPnP()
         u.discoverdelay = 200
-        ndevices = u.discover()
-        if ndevices == 0:
+        if u.discover() == 0:
             return None, logs + ["STY:error:UPnP discovery failed: No IGD found on network."]
 
         u.selectigd()
-        external_ip = u.externalipaddress()
         internal_ip = u.lanaddr
         logs.append(f"STY:log:UPnP device found.")
 
-        for port in port_range:
-            mapping = u.getspecificportmapping(port, 'TCP')
+        # --- Build a complete list of currently mapped ports ---
+        mapped_ports = set()
+        i = 0
+        while True:
+            mapping = u.getgenericportmapping(i)
             if mapping is None:
-                logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
-                try:
-                    u.addportmapping(port, 'TCP', internal_ip, port, f'SCM - {server_name}', '')
-                    logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
-                    upnp_mappings[server_name] = port  # Track the mapping
-                    return port, logs
-                except Exception as e:
-                    # Some routers have a delay in clearing mappings, causing a conflict even when the port appears free
-                    if 'ConflictInMappingEntry' in str(e):
-                        logs.append(f"STY:log:Conflict on port {port} despite it appearing free. Attempting to clear and retry...")
-                        try:
-                            if u.deleteportmapping(port, 'TCP'):
-                                logs.append(f"STY:log:Sent a cleanup request for port {port}. Pausing for router to process...")
-                                time.sleep(2)
-                                # Second attempt
-                                u.addportmapping(port, 'TCP', internal_ip, port, f'SCM - {server_name}', '')
-                                logs.append(f"STY:log:Successfully forwarded port {port} on the second attempt.")
-                                upnp_mappings[server_name] = port
-                                return port, logs
-                            else:
-                                logs.append(f"STY:error:Failed to clear potential ghost mapping on port {port}. It might be in use by another device.")
-                        except Exception as e2:
-                            logs.append(f"STY:error:Failed to map port {port} on retry after conflict: {e2}")
-                    else:
-                        logs.append(f"STY:error:Failed to map port {port}: {e}")
-            else:
-                logs.append(f"STY:log:Port {port} is already mapped to {mapping[0]}:{mapping[1]}. Checking next port.")
+                break
+            ext_port, proto, _, _, _, _, _ = mapping
+            if proto == 'TCP':
+                mapped_ports.add(ext_port)
+            i += 1
+        
+        if mapped_ports:
+            logs.append(f"STY:log:Router reports these TCP ports are mapped: {sorted(list(mapped_ports))}")
+        # ----------------------------------------------------
+
+        for port in port_range:
+            if is_port_in_use(port):
+                logs.append(f"STY:log:Port {port} is in use locally. Skipping.")
+                continue
+
+            if port in mapped_ports:
+                logs.append(f"STY:log:Port {port} is already mapped on router. Skipping.")
+                continue
+
+            logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
+            try:
+                description = f'SCM - {server_name}'
+                u.addportmapping(port, 'TCP', internal_ip, port, description, '')
+                logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
+                upnp_mappings[server_name] = port
+                return port, logs
+            except Exception as e:
+                # Should only happen in a true race condition
+                logs.append(f"STY:error:Failed to map port {port}: {e}")
 
         return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
 
