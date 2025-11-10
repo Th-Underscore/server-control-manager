@@ -67,6 +67,7 @@ PORT_RANGE = range(25565, 25575)  # 25565-25574
 # --- Global flag to indicate shutdown ---
 shutting_down = False
 upnp_mappings = {}  # { 'server_name': port }
+upnp_lock = threading.Lock()
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
@@ -169,56 +170,57 @@ def setup_upnp_port_forwarding(server_name, port_range):
     if not miniupnpc:
         return None, logs + ["STY:error:miniupnpc library is not installed. Cannot use UPnP."]
 
-    try:
-        u = miniupnpc.UPnP()
-        u.discoverdelay = 200
-        if u.discover() == 0:
-            return None, logs + ["STY:error:UPnP discovery failed: No IGD found on network."]
+    with upnp_lock:
+        try:
+            u = miniupnpc.UPnP()
+            u.discoverdelay = 200
+            if u.discover() == 0:
+                return None, logs + ["STY:error:UPnP discovery failed: No IGD found on network."]
 
-        u.selectigd()
-        internal_ip = u.lanaddr
-        logs.append(f"STY:log:UPnP device found.")
+            u.selectigd()
+            internal_ip = u.lanaddr
+            logs.append(f"STY:log:UPnP device found.")
 
-        # --- Build a complete list of currently mapped ports ---
-        mapped_ports = set()
-        i = 0
-        while True:
-            mapping = u.getgenericportmapping(i)
-            if mapping is None:
-                break
-            ext_port, proto, _, _, _, _, _ = mapping
-            if proto == 'TCP':
-                mapped_ports.add(ext_port)
-            i += 1
-        
-        if mapped_ports:
-            logs.append(f"STY:log:Router reports these TCP ports are mapped: {sorted(list(mapped_ports))}")
-        # ----------------------------------------------------
+            # --- Build a complete list of currently mapped ports ---
+            mapped_ports = set()
+            i = 0
+            while True:
+                mapping = u.getgenericportmapping(i)
+                if mapping is None:
+                    break
+                ext_port, proto, _, _, _, _, _ = mapping
+                if proto == 'TCP':
+                    mapped_ports.add(ext_port)
+                i += 1
+            
+            if mapped_ports:
+                logs.append(f"STY:log:Router reports these TCP ports are mapped: {sorted(list(mapped_ports))}")
+            # ----------------------------------------------------
 
-        for port in port_range:
-            if is_port_in_use(port):
-                logs.append(f"STY:log:Port {port} is in use locally. Skipping.")
-                continue
+            for port in port_range:
+                if is_port_in_use(port):
+                    logs.append(f"STY:log:Port {port} is in use locally. Skipping.")
+                    continue
 
-            if port in mapped_ports:
-                logs.append(f"STY:log:Port {port} is already mapped on router. Skipping.")
-                continue
+                if port in mapped_ports:
+                    logs.append(f"STY:log:Port {port} is already mapped on router. Skipping.")
+                    continue
 
-            logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
-            try:
-                description = f'SCM - {server_name}'
-                u.addportmapping(port, 'TCP', internal_ip, port, description, '')
-                logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
-                upnp_mappings[server_name] = port
-                return port, logs
-            except Exception as e:
-                # Should only happen in a true race condition
-                logs.append(f"STY:error:Failed to map port {port}: {e}")
+                logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
+                try:
+                    description = f'SCM - {server_name}'
+                    u.addportmapping(port, 'TCP', internal_ip, port, description, '')
+                    logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
+                    upnp_mappings[server_name] = port
+                    return port, logs
+                except Exception as e:
+                    # Should only happen in a true race condition
+                    logs.append(f"STY:error:Failed to map port {port}: {e}")
 
-        return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
+            return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
 
-    except Exception as e:
-        return None, logs + [f"STY:error:An unexpected UPnP error occurred: {e}"]
+        except Exception as e:
+            return None, logs + [f"STY:error:An unexpected UPnP error occurred: {e}"]
 
 def remove_upnp_port_forwarding(port):
     """Removes a specific port forwarding rule."""
@@ -226,19 +228,20 @@ def remove_upnp_port_forwarding(port):
     if not miniupnpc:
         return logs + ["STY:log:miniupnpc library not installed, skipping UPnP cleanup."]
 
-    try:
-        u = miniupnpc.UPnP()
-        u.discoverdelay = 200
-        if u.discover() > 0:
-            u.selectigd()
-            if u.deleteportmapping(port, 'TCP'):
-                logs.append(f"STY:log:Successfully removed UPnP port mapping for port {port}.")
+    with upnp_lock:
+        try:
+            u = miniupnpc.UPnP()
+            u.discoverdelay = 200
+            if u.discover() > 0:
+                u.selectigd()
+                if u.deleteportmapping(port, 'TCP'):
+                    logs.append(f"STY:log:Successfully removed UPnP port mapping for port {port}.")
+                else:
+                    logs.append(f"STY:error:Failed to remove UPnP port mapping for port {port}. It may not exist.")
             else:
-                logs.append(f"STY:error:Failed to remove UPnP port mapping for port {port}. It may not exist.")
-        else:
-            logs.append("STY:error:Could not find UPnP device to remove port mapping.")
-    except Exception as e:
-        logs.append(f"STY:error:An error occurred while removing UPnP mapping for port {port}: {e}")
+                logs.append("STY:error:Could not find UPnP device to remove port mapping.")
+        except Exception as e:
+            logs.append(f"STY:error:An error occurred while removing UPnP mapping for port {port}: {e}")
     return logs
 
 def cleanup_server_port_mapping(server_name):
