@@ -8,6 +8,7 @@ import secrets
 import shutil
 import signal
 import socket
+
 try:
     import miniupnpc
 except ImportError:
@@ -162,7 +163,7 @@ def get_server_icon(server_path):
 def is_port_in_use(port):
     """Checks if a local port is already in use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('127.0.0.1', port)) == 0
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 def setup_upnp_port_forwarding(server_name, port_range):
@@ -190,10 +191,10 @@ def setup_upnp_port_forwarding(server_name, port_range):
                 if mapping is None:
                     break
                 ext_port, proto, _, _, _, _, _ = mapping
-                if proto == 'TCP':
+                if proto == "TCP":
                     mapped_ports.add(ext_port)
                 i += 1
-            
+
             if mapped_ports:
                 logs.append(f"STY:log:Router reports these TCP ports are mapped: {sorted(list(mapped_ports))}")
             # ----------------------------------------------------
@@ -209,8 +210,8 @@ def setup_upnp_port_forwarding(server_name, port_range):
 
                 logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
                 try:
-                    description = f'SCM - {server_name}'
-                    u.addportmapping(port, 'TCP', internal_ip, port, description, '')
+                    description = f"SCM - {server_name}"
+                    u.addportmapping(port, "TCP", internal_ip, port, description, "")
                     logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
                     upnp_mappings[server_name] = port
                     return port, logs
@@ -222,6 +223,7 @@ def setup_upnp_port_forwarding(server_name, port_range):
 
         except Exception as e:
             return None, logs + [f"STY:error:An unexpected UPnP error occurred: {e}"]
+
 
 def remove_upnp_port_forwarding(port):
     """Removes a specific port forwarding rule."""
@@ -235,7 +237,7 @@ def remove_upnp_port_forwarding(port):
             u.discoverdelay = 200
             if u.discover() > 0:
                 u.selectigd()
-                if u.deleteportmapping(port, 'TCP'):
+                if u.deleteportmapping(port, "TCP"):
                     logs.append(f"STY:log:Successfully removed UPnP port mapping for port {port}.")
                 else:
                     logs.append(f"STY:error:Failed to remove UPnP port mapping for port {port}. It may not exist.")
@@ -244,6 +246,7 @@ def remove_upnp_port_forwarding(port):
         except Exception as e:
             logs.append(f"STY:error:An error occurred while removing UPnP mapping for port {port}: {e}")
     return logs
+
 
 def cleanup_server_port_mapping(server_name):
     """Finds and removes the port mapping for a specific server."""
@@ -492,7 +495,7 @@ def copy_latest_backup(server_name, server_path):
 
 
 # --- Routes ---
-@app.route('/favicon.ico')
+@app.route("/favicon.ico")
 def favicon():
     if not FAVICON_PATH or not os.path.isfile(os.path.join(app.root_path, FAVICON_PATH)):
         return ("", 204)
@@ -984,7 +987,7 @@ def monitor_process_resources(server_name, pid):
 
             total_cpu_usage = 0
             total_ram_usage_bytes = 0
-            
+
             current_procs_in_tree: dict[str, psutil.Process] = {}
             try:
                 # Get all processes in the tree for this polling cycle
@@ -999,7 +1002,7 @@ def monitor_process_resources(server_name, pid):
                 if pid not in tracked_procs:
                     proc.cpu_percent(interval=None)  # First call is for initialization
                     tracked_procs[pid] = proc
-            
+
             # Remove processes that have terminated
             for pid in list(tracked_procs.keys()):
                 if pid not in current_procs_in_tree:
@@ -1013,16 +1016,16 @@ def monitor_process_resources(server_name, pid):
                         total_ram_usage_bytes += proc.memory_info().rss
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-            
+
             with process_info["lock"]:
-                timestamp = time.time() * 1000 # Use milliseconds for JS charts
-                if 'resources' not in process_info:
-                    process_info['resources'] = {
-                        'cpu': deque(maxlen=MAX_RESOURCE_HISTORY),
-                        'ram': deque(maxlen=MAX_RESOURCE_HISTORY)
+                timestamp = time.time() * 1000  # Use milliseconds for JS charts
+                if "resources" not in process_info:
+                    process_info["resources"] = {
+                        "cpu": deque(maxlen=MAX_RESOURCE_HISTORY),
+                        "ram": deque(maxlen=MAX_RESOURCE_HISTORY),
                     }
-                process_info['resources']['cpu'].append((timestamp, total_cpu_usage))
-                process_info['resources']['ram'].append((timestamp, total_ram_usage_bytes))
+                process_info["resources"]["cpu"].append((timestamp, total_cpu_usage))
+                process_info["resources"]["ram"].append((timestamp, total_ram_usage_bytes))
 
             time.sleep(RESOURCE_MONITOR_INTERVAL)
     except psutil.NoSuchProcess:
@@ -1042,20 +1045,19 @@ def get_resource_usage(server_name):
         return jsonify({"status": "error", "message": "Server not running or not found."}), 404
 
     process_info = running_processes.get(server_name)
-    if not process_info or 'resources' not in process_info:
+    if not process_info or "resources" not in process_info:
         return jsonify({"cpu": {"latest": 0, "history": []}, "ram": {"latest": 0, "history": []}})
 
     with process_info["lock"]:
-        cpu_history = list(process_info['resources']['cpu'])
-        ram_history = list(process_info['resources']['ram'])
+        cpu_history = list(process_info["resources"]["cpu"])
+        ram_history = list(process_info["resources"]["ram"])
 
     latest_cpu = cpu_history[-1][1] if cpu_history else 0
     latest_ram = ram_history[-1][1] if ram_history else 0
 
-    return jsonify({
-        "cpu": {"latest": latest_cpu, "history": cpu_history},
-        "ram": {"latest": latest_ram, "history": ram_history}
-    })
+    return jsonify(
+        {"cpu": {"latest": latest_cpu, "history": cpu_history}, "ram": {"latest": latest_ram, "history": ram_history}}
+    )
 
 
 def get_human_readable_size(size, decimal_places=2):
