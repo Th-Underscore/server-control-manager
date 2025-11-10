@@ -57,6 +57,7 @@ SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", _generated_secret_key_default)
 SSL_CERT_PATH = "C:\\Users\\Me\\cert.pem"  # "C:\\Users\\Me\\server.crt"
 SSL_KEY_PATH = "C:\\Users\\Me\\key.pem"  # "C:\\Users\\Me\\server.key"
 USE_SSL = False
+FAVICON_PATH = "favicon.ico"  # Path to favicon, relative to the script's location.
 MAX_LOG_LINES = 1000  # Max console lines to keep in memory
 MAX_RESOURCE_HISTORY = 120  # Keep 120 data points (e.g., 2 minutes of data at 1s intervals)
 RESOURCE_MONITOR_INTERVAL = 1  # seconds
@@ -491,6 +492,13 @@ def copy_latest_backup(server_name, server_path):
 
 
 # --- Routes ---
+@app.route('/favicon.ico')
+def favicon():
+    if not FAVICON_PATH or not os.path.isfile(os.path.join(app.root_path, FAVICON_PATH)):
+        return ("", 204)
+    return send_from_directory(app.root_path, FAVICON_PATH)
+
+
 @app.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per minute")  # Apply rate limit specifically to login attempts
 def login():
@@ -1068,6 +1076,7 @@ PUBLIC_FILES_LIST_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Public Files for {{ server_name }} - Server Control Panel</title>
+    <link rel="icon" href="{{ url_for('favicon') }}">
     <script>
         // Apply theme immediately to prevent flashing
         (function() {
@@ -1287,6 +1296,7 @@ SERVER_LOGS_LIST_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logs for {{ server_name }} - Server Control Panel</title>
+    <link rel="icon" href="{{ url_for('favicon') }}">
     <script>
         // Apply theme immediately to prevent flashing
         (function() {
@@ -1466,6 +1476,7 @@ SERVER_LOG_VIEW_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Log: {{ log_filename }} ({{ server_name }}) - Server Control Panel</title>
+    <link rel="icon" href="{{ url_for('favicon') }}">
     <script>
         // Apply theme immediately to prevent flashing
         (function() {
@@ -1717,6 +1728,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Server Control Panel</title>
+    <link rel="icon" href="{{ url_for('favicon') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
@@ -2564,6 +2576,7 @@ LOGIN_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Server Control Panel</title>
+    <link rel="icon" href="{{ url_for('favicon') }}">
     <script>
         // Apply theme immediately to prevent flashing
         (function() {
