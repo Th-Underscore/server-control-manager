@@ -62,7 +62,7 @@ MAX_LOG_LINES = 1000  # Max console lines to keep in memory
 MAX_RESOURCE_HISTORY = 120  # Keep 120 data points (e.g., 2 minutes of data at 1s intervals)
 RESOURCE_MONITOR_INTERVAL = 1  # seconds
 UPNP_ENABLED = False  # Set to True to enable automatic port forwarding. Requires a UPnP/IGD enabled router.
-PORT_RANGE = range(25565, 25575)  # 25565-25574
+PORT_RANGE = range(25565, 25574 + 1)  # 25565-25574
 # ---------------------
 
 # --- Global flag to indicate shutdown ---
