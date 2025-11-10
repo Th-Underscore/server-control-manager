@@ -4,4 +4,3 @@ Flask-Limiter
 Werkzeug
 python-dotenv
 psutil
-miniupnpc
