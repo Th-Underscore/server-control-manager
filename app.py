@@ -66,9 +66,10 @@ UPNP_ENABLED = False  # Set to True to enable automatic port forwarding. Require
 PORT_RANGE = range(25565, 25574 + 1)  # 25565-25574
 # ---------------------
 
-# --- Global flag to indicate shutdown ---
+# --- Global variables ---
 shutting_down = False
 upnp_mappings = {}  # { 'server_name': port }
+reserved_ports = set()  # To avoid race conditions
 upnp_lock = threading.Lock()
 
 app = Flask(__name__)
@@ -208,8 +209,13 @@ def setup_upnp_port_forwarding(server_name, port_range):
                     logs.append(f"STY:log:Port {port} is already mapped on router. Skipping.")
                     continue
 
+                if port in reserved_ports:
+                    logs.append(f"STY:log:Port {port} is reserved by another starting SCM server. Skipping.")
+                    continue
+
                 logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
                 try:
+                    reserved_ports.add(port)
                     description = f"SCM - {server_name}"
                     u.addportmapping(port, "TCP", internal_ip, port, description, "")
                     logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
@@ -218,6 +224,7 @@ def setup_upnp_port_forwarding(server_name, port_range):
                 except Exception as e:
                     # Should only happen in a true race condition
                     logs.append(f"STY:error:Failed to map port {port}: {e}")
+                    reserved_ports.discard(port)
 
             return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
 
@@ -232,6 +239,8 @@ def remove_upnp_port_forwarding(port):
         return logs + ["STY:log:miniupnpc library not installed, skipping UPnP cleanup."]
 
     with upnp_lock:
+        # Also remove from our internal reservation list
+        reserved_ports.discard(port)
         try:
             u = miniupnpc.UPnP()
             u.discoverdelay = 200
