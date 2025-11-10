@@ -131,34 +131,39 @@ SERVERS_BASE_DIR/
 
 ## To-Do
 
-*   User manager (multiple users with different permissions)
-    *   Make command password optional
-    *   Add option for start/stop password
-    *   Hide certain actions/views based on permissions (start, stop, console, logs, etc.)
-    *   Per-server permissions
-*   UI improvements
-    *   Option to disable §k rendering or text formatting completely
-    *   Option for max console output history length
-    *   Option to disable server icon and/or MOTD
-    *   Option for custom CSS
-    *   Option for custom favicon
-    *   Search/filter for the live console output
-    *   "Restart" button
-    *   Settings page in the UI
-*   Add support for Unix
-*   Refactoring
-    *   Separate HTML, CSS, and JS into their own files
-    *   Move configuration variables into a dedicated file (e.g., `config.ini`)
-    *   Break into smaller modules using Flask Blueprints (e.g., for auth, server management, API)
-    *   Add typing
-*   Persist server state (e.g., PID files) to allow the panel to reconnect to processes that are still running after a panel restart
-*   Feature enhancements
-    *   Add output logging for inputted commands
-    *   Upgrade backup management (e.g., daily, monthly, etc.; delete old ones, etc.)
-    *   Add a server configuration editor (e.g., for `server.properties`)
-    *   Implement pagination/streaming for viewing large log files to reduce memory usage
-    *   Add a file manager for server directories with upload/delete capabilities
-    *   Add a "Restore Backup" feature in the UI
-    *   Implement scheduled tasks (e.g., daily restarts, timed commands)
-    *   Add API endpoints for programmatic control (e.g., webhooks)
-*   Add a proper logging setup for the control panel application itself (separate from per-server logs)
+- User manager (multiple users with different permissions)
+    - Make command password optional
+    - Add option for start/stop password
+    - Hide certain actions/views based on permissions (start, stop, console, logs, etc.)
+    - Per-server permissions
+- UI improvements
+    - Option to disable §k rendering or text formatting completely
+    - Option for max console output history length
+    - Option to disable server icon and/or MOTD
+    - Option for custom CSS
+    - Option for custom background
+    - Search/filter for the live console output
+    - "Restart" button
+    - Settings page in the UI
+    - Sorting for serverlist (name, last started, date created)
+    - Total CPU + RAM usage (account for stopped servers still showing last state)
+    - Complete mobile redesign (icons for buttons, reorganized layout, etc.)
+- Test on Unix OS
+- Refactoring
+    - Separate HTML, CSS, and JS into their own files
+    - Move configuration variables into a dedicated file (e.g., `config.ini`)
+    - Break into smaller modules using Flask Blueprints (e.g., for auth, server management, API)
+    - Add Python typing
+- Persist server state (e.g., PID files) to allow the panel to reconnect to processes that are still running after a panel restart
+- Feature enhancements
+    - Add output logging for inputted commands
+    - Upgrade backup management (e.g., daily, monthly, etc.; delete old ones, etc.)
+    - Add a server configuration editor (e.g., for `server.properties`)
+    - Implement pagination/streaming for viewing large log files to reduce memory usage
+    - Add a file manager for server directories with upload/delete capabilities
+    - Add a "Restore Backup" feature in the UI
+    - Implement scheduled tasks (e.g., daily restarts, timed commands)
+    - Add API endpoints for programmatic control (e.g., webhooks)
+    - Add server ordering (by date created, last open, etc.)
+    - Add public files ordering
+- Add a proper logging setup for server-control-manager itself (separate from per-server logs)
