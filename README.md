@@ -15,7 +15,7 @@ A simple web-based control panel built with Flask to manage and monitor server p
     *   **Authentication**: Secure login system using Flask-Login to protect access.
     *   **SSL Support**: Optional SSL/TLS encryption for secure connections (requires certificate and key files).
     *   **Pretty UI**: Clean and responsive design, including server icons (`server-icon.png`) and MOTD subheaders (`server.properties`).
-*   **Automatic Port Forwarding** *(optional)*: Automatically discover and forward ports to the router for easy access from the internet. Compatible with most home routers and multiple devices hosting servers.
+*   **Automatic Port Forwarding** *(optional)*: Automatically discover and forward ports to the router via UPnP for easy access from the internet. Compatible with most home routers and multiple devices hosting servers.
 *   **Backup Copy**: Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
 *   **Configurable**: Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
@@ -24,7 +24,7 @@ A simple web-based control panel built with Flask to manage and monitor server p
 ## Requirements
 
 *   Python 3.x
-*   `requirements.txt` or `requirements-upnp.txt`
+*   `requirements.txt` or `requirements-noupnp.txt`
 
 You can install the required Python packages using pip:
 ```bash
@@ -167,5 +167,6 @@ SERVERS_BASE_DIR/
     - Add API endpoints for programmatic control (e.g., webhooks)
     - Add server ordering (by date created, last open, etc.)
     - Add public files ordering
-    - Add more UPnP configuration options (e.g., RCON port, etc.)
+    - Add more UPnP configuration options (e.g., RCON port offset)
+    - Add more robust UPnP mapping logic (e.g., delete old mappings on port conflict)
 - Add a proper logging setup for server-control-manager itself (separate from per-server logs)
