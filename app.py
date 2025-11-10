@@ -612,6 +612,7 @@ def start_server(server_name):
 
     # --- Start the process (Common logic) ---
     pre_start_logs = [f"STY:marker:--- Starting {server_name} ({BATCH_FILE_NAME}) ---"]
+    port_to_return = None
 
     # --- UPnP Port Forwarding Logic ---
     if UPNP_ENABLED:
@@ -620,6 +621,7 @@ def start_server(server_name):
         pre_start_logs.extend(upnp_logs)
 
         if found_port:
+            port_to_return = found_port
             pre_start_logs.append(f"STY:log:Using port: {found_port}. Updating server.properties...")
             success, message = update_server_properties_port(server_path, found_port)
             if success:
@@ -642,6 +644,8 @@ def start_server(server_name):
                 return redirect(url_for("index"))
     else:
         pre_start_logs.append("STY:log:UPnP is disabled. Using port from server.properties.")
+        properties = get_server_properties(server_path)
+        port_to_return = properties.get("server-port")
 
     try:
         process = subprocess.Popen(
@@ -679,7 +683,10 @@ def start_server(server_name):
 
         # --- Response Generation (Different for GET and POST) ---
         if request.method == "POST":
-            return jsonify({"status": "success", "message": f"Started {server_name}."})
+            response_data = {"status": "success", "message": f"Started {server_name}."}
+            if port_to_return:
+                response_data["port"] = port_to_return
+            return jsonify(response_data)
         else:
             flash(f"Success: Started server '{server_name}'.", "success")
             return redirect(url_for("index"))
@@ -1832,7 +1839,7 @@ HTML_TEMPLATE = """
         .output-container { position: relative; }
         .scroll-to-bottom { position: absolute; bottom: 10px; right: 10px; background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: none; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
-        .server-port-display { position: absolute; top: 5px; right: 5px; font-size: 0.75em; font-family: monospace; color: var(--status-text); background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; display: none; z-index: 10; }
+        .server-port-display { position: absolute; top: 5px; right: 5px; font-size: 0.8em; font-family: monospace; color: var(--status-text); background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; display: none; z-index: 10; }
         .dark-mode .server-port-display { background-color: rgba(255,255,255,0.05); }
     </style>
 </head>
@@ -2120,6 +2127,13 @@ HTML_TEMPLATE = """
                         if (data.status === 'success') {
                             console.log(`${serverName} started successfully.`);
                             updateUI(serverName, 'running', 'Running');
+                            if (data.port) {
+                                const item = document.getElementById(`server-${serverName}`);
+                                const portDisplay = item.querySelector('.server-port-display');
+                                if (portDisplay) {
+                                    portDisplay.textContent = data.port;
+                                }
+                            }
                             startListening(serverName);
                         } else {
                             // This part might not be reached if response.ok is false, but good as a fallback
