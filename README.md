@@ -6,28 +6,29 @@ A simple web-based control panel built with Flask to manage and monitor server p
 
 ## Features
 
-*   **Web Interface:** Easy-to-use interface to start, stop, and monitor servers.
-    *   **Process Management:** Finds server folders containing a specified batch file (`starter.bat` by default) within a base directory.
-    *   **Real-time Output:** Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
-    *   **Command Execution:** Send commands directly to the stdin of running server processes (requires a command password).
-    *   **Logs:** View each and every server's log files.
-    *   **Public Files:** Serve files and directories from the server's public folder.
-    *   **Authentication:** Secure login system using Flask-Login to protect access.
-    *   **SSL Support:** Optional SSL/TLS encryption for secure connections (requires certificate and key files).
-    *   **Pretty UI:** Clean and responsive design, including server icons (`server-icon.png`) and MOTD subheaders (`server.properties`).
-*   **Backup Copy:** Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
-*   **Configurable:** Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
+*   **Web Interface**: Easy-to-use interface to start, stop, and monitor servers.
+    *   **Process Management**: Finds server folders containing a specified batch file (`starter.bat` by default) within a base directory.
+    *   **Real-time Output**: Streams live console output (stdout & stderr) from running server processes using Server-Sent Events (SSE).
+    *   **Command Execution**: Send commands directly to the stdin of running server processes (requires a command password).
+    *   **Logs**: View each and every server's log files.
+    *   **Public Files**: Serve files and directories from the server's public folder.
+    *   **Authentication**: Secure login system using Flask-Login to protect access.
+    *   **SSL Support**: Optional SSL/TLS encryption for secure connections (requires certificate and key files).
+    *   **Pretty UI**: Clean and responsive design, including server icons (`server-icon.png`) and MOTD subheaders (`server.properties`).
+*   **Automatic Port Forwarding** *(optional)*: Automatically discover and forward ports to the router for easy access from the internet. Compatible with most home routers and multiple devices hosting servers.
+*   **Backup Copy**: Automatically copies the latest backup folder from a server's `backups` directory to a shared location upon stopping the server.
+*   **Configurable**: Key settings like server directory, batch file name, host, port, and credentials can be easily modified in `app.py` or via `.env` for passwords.
 
 *Warning*: Keep your paths secure! Console output and logs _will_ contain the path to the server folder. Consider running this in a VM or container.
 
 ## Requirements
 
 *   Python 3.x
-*   `requirements.txt`
+*   `requirements.txt` or `requirements-upnp.txt`
 
 You can install the required Python packages using pip:
 ```bash
-pip install Flask Flask-Login Flask-Limiter Werkzeug python-dotenv psutil
+pip install Flask Flask-Login Flask-Limiter Werkzeug python-dotenv psutil miniupnpc
 ```
 or
 ```bash
@@ -58,7 +59,7 @@ Before running the application, you **must** configure the following variables a
     # SECRET_KEY = "your_very_strong_random_secret_key"
     ```
 
-**Optional Configuration:**
+**Optional Configuration**:
 
 *   **`BATCH_FILE_NAME`**: Change if your server startup scripts have a different name (default: `starter.bat`).
 *   **`BACKUPS_DIR`**: Name of the shared directory where backups from individual servers are copied (default: `backups`). This directory is created within `SERVERS_BASE_DIR`.
@@ -115,11 +116,11 @@ SERVERS_BASE_DIR/
 1.  Open the web interface URL in your browser.
 2.  Log in using the configured username and password.
 3.  You will see a list of available servers found in your `SERVERS_BASE_DIR`.
-4.  **Start:** Click the "Start" button next to a server to execute its batch file. The status will change to "Running", and the output console will appear.
-5.  **Stop:** Click the "Stop" button to terminate the server process. If a `backups` folder exists with subfolders, the latest backup will be copied. The status will change to "Stopped" or "Finished".
-6.  **View Output:** The output area below each server shows the real-time console output while it's running and persists after it stops.
-7.  **Send Command:** For a running server, type your command into the "Enter command..." field, enter the "Cmd Password", and click "Send". The command will be sent to the server's input.
-8.  **Logout:** Click the "Logout" link in the top navigation bar.
+4.  **Start**: Click the "Start" button next to a server to execute its batch file. The status will change to "Running", and the output console will appear.
+5.  **Stop**: Click the "Stop" button to terminate the server process. If a `backups` folder exists with subfolders, the latest backup will be copied. The status will change to "Stopped" or "Finished".
+6.  **View Output**: The output area below each server shows the real-time console output while it's running and persists after it stops.
+7.  **Send Command**: For a running server, type your command into the "Enter command..." field, enter the "Cmd Password", and click "Send". The command will be sent to the server's input.
+8.  **Logout**: Click the "Logout" link in the top navigation bar.
 
 ## Security Notes
 
@@ -166,4 +167,5 @@ SERVERS_BASE_DIR/
     - Add API endpoints for programmatic control (e.g., webhooks)
     - Add server ordering (by date created, last open, etc.)
     - Add public files ordering
+    - Add more UPnP configuration options (e.g., RCON port, etc.)
 - Add a proper logging setup for server-control-manager itself (separate from per-server logs)
