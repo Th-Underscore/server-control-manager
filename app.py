@@ -1134,6 +1134,17 @@ PUBLIC_FILES_LIST_TEMPLATE = """
             --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
 
+        ::-webkit-scrollbar { width: 12px; height: 12px; }
+        ::-webkit-scrollbar-button { display: none; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0);
+            border-radius: 20px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
+
         body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
         .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
         .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
@@ -1358,6 +1369,17 @@ SERVER_LOGS_LIST_TEMPLATE = """
             --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
 
+        ::-webkit-scrollbar { width: 12px; height: 12px; }
+        ::-webkit-scrollbar-button { display: none; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
+
         body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
         .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
         .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
@@ -1529,6 +1551,17 @@ SERVER_LOG_VIEW_TEMPLATE = """
             --box-shadow: 0 2px 5px rgba(0,0,0,0.3);
             /* Log colors are already dark, so they don't need to change much */
         }
+
+        ::-webkit-scrollbar { width: 12px; height: 12px; }
+        ::-webkit-scrollbar-button { display: none; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
 
         body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
         .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
@@ -1808,6 +1841,17 @@ HTML_TEMPLATE = """
             --flash-info-border: #0c5460;
         }
 
+        ::-webkit-scrollbar { width: 12px; height: 12px; }
+        ::-webkit-scrollbar-button { display: none; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+        ::-webkit-scrollbar-thumb:hover { background-color: rgba(255,255,255,0.3); }
+
         body { font-family: sans-serif; line-height: 1.6; margin: 0; background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.2s, color 0.2s; }
         .navbar { background-color: var(--navbar-bg); padding: 10px 20px; color: var(--navbar-text); display: flex; justify-content: space-between; align-items: center; }
         .navbar .left-nav, .navbar .right-nav { display: flex; align-items: center; gap: 15px; }
@@ -1856,7 +1900,7 @@ HTML_TEMPLATE = """
         .resource-graph-container { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: none; }
         .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
-        .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; }
+        .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; word-break: break-all; }
         .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
         .log-stdin { color: #e5e549; }
         .log-marker { color: #7bb5b5; }
@@ -2633,6 +2677,13 @@ LOGIN_TEMPLATE = """
             --flash-info-bg: #2c5a68;
             --flash-info-text: #d1ecf1;
             --flash-info-border: #0c5460;
+        }
+        ::-webkit-scrollbar { width: 12px; }
+        ::-webkit-scrollbar-track { background: var(--bg-color); }
+        ::-webkit-scrollbar-thumb {
+            background-color: #555;
+            border-radius: 20px;
+            border: 3px solid var(--bg-color);
         }
         body { font-family: sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; transition: background-color 0.2s, color 0.2s; }
         .login-container { background: var(--login-bg); padding: 30px 40px; border-radius: 8px; box-shadow: var(--box-shadow); text-align: center; width: 100%; max-width: 400px; position: relative; }
