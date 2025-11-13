@@ -570,12 +570,18 @@ def index():
             "port": properties.get("server-port", "N/A"),
         }
 
-    # Pass server status (running or not) to the template
-    server_status = {
-        name: (proc_info["process"] is not None and proc_info["process"].poll() is None)
-        for name, proc_info in running_processes.items()
-        if proc_info and "process" in proc_info
-    }
+    # Pass server status (running, stopping, or stopped) to the template
+    server_status = {}
+    for server_name in servers:
+        proc_info = running_processes.get(server_name)
+        status = "Stopped"  # Default
+        if proc_info and proc_info.get("process") and proc_info["process"].poll() is None:
+            if proc_info.get("stop_requested"):
+                status = "Stopping"
+            else:
+                status = "Running"
+        server_status[server_name] = status
+
     return render_template_string(
         HTML_TEMPLATE,
         servers=servers,
@@ -588,7 +594,7 @@ def index():
     )
 
 
-@app.route("/start/<server_name>", methods=["GET", "POST"])  # <--- Allow both GET and POST
+@app.route("/start/<server_name>", methods=["GET", "POST"])
 @login_required
 def start_server(server_name):
     """
@@ -601,10 +607,8 @@ def start_server(server_name):
     # --- Validation (Common for GET and POST) ---
     if server_name not in servers:
         if request.method == "POST":
-            # Abort for POST is fine, leads to JS error handling
             abort(404, "Invalid server name.")
         else:  # request.method == 'GET'
-            # For GET, flash a message and redirect
             flash(f"Error: Invalid server name '{server_name}'.", "danger")
             return redirect(url_for("index"))
 
@@ -682,7 +686,6 @@ def start_server(server_name):
         )
 
         # Store process info and start output reading thread
-        # Create the lock *before* adding the entry to avoid race conditions
         new_lock = threading.RLock()
         running_processes[server_name] = {
             "process": process,
@@ -1965,28 +1968,28 @@ HTML_TEMPLATE = """
                                 <span class="server-motd" data-motd="{{ server_details[server]['motd'] }}">{{ server_details[server]['motd'] }}</span>
                             </div>
                             {% if resource_monitor_enabled %}
-                            <div class="resource-monitor" id="resource-monitor-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
+                            <div class="resource-monitor" id="resource-monitor-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}block{% else %}none{% endif %};">
                                 <span class="resource-item">CPU: <b id="cpu-{{ server }}">0.0</b>%</span>
                                 <span class="resource-item">RAM: <b id="ram-{{ server }}">0 MB</b></span>
                             </div>
                             {% endif %}
                         </div>
                         <div class="server-actions">
-                           <button class="button start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
-                           <button class="button stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
-                           <button class="button force-stop-button" data-server="{{ server }}">Force Stop</button>
+                           <button class="button start-button" data-server="{{ server }}" {% if server_status.get(server) in ['Running', 'Stopping'] %}disabled{% endif %}>Start</button>
+                           <button class="button stop-button" data-server="{{ server }}" {% if server_status.get(server) != 'Running' %}disabled{% endif %}>Stop</button>
+                           <button class="button force-stop-button" data-server="{{ server }}" style="display: {% if server_status.get(server) == 'Stopping' %}inline-block{% else %}none{% endif %};">Force Stop</button>
                            <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="button logs-button" data-server="{{ server }}">View Logs</a>
                            <a href="{{ url_for('list_public_files', server_name=server) }}" class="button public-button" data-server="{{ server }}">Public Files</a>
-                           <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
+                           <span class="status" id="status-{{ server }}">{% set status = server_status.get(server, 'Stopped') %}{% if status == 'Stopping' %}Stopping...{% else %}{{ status }}{% endif %}</span>
                        </div>
                    </div>
-                   <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
+                   <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}flex{% else %}none{% endif %};">
                        <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
                        <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
-                       <button class="button command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
+                       <button class="button command-button" data-server="{{ server }}" {% if server_status.get(server) != 'Running' %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
                    </div>
                     <div class="output-container">
-                        <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
+                        <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}block{% else %}none{% endif %};">
                             <div class="output-title">Output for {{ server }}:</div>
                         </div>
                         <button class="scroll-to-bottom" id="scroll-{{ server }}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg></button>
@@ -2167,7 +2170,7 @@ HTML_TEMPLATE = """
  
  
                 // --- Initial State ---
-                if (statusSpan.textContent === 'Running') {
+                if (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...') {
                     startListening(serverName);
                     const portDisplay = item.querySelector('.server-port-display');
                     if (portDisplay) portDisplay.style.display = 'block';
@@ -2765,7 +2768,7 @@ def cleanup_processes():
     global running_processes
     global shutting_down
 
-    if shutting_down:  # Avoid re-entry if already called
+    if shutting_down:
         return
 
     shutting_down = True
@@ -2804,7 +2807,7 @@ def cleanup_processes():
                             print(
                                 f"   - Process {process.pid} for {server_name} did not terminate via taskkill, forcing kill..."
                             )
-                            process.kill()  # Force kill the original process
+                            process.kill()
                             try:
                                 process.wait(timeout=5)  # Wait for forced kill
                             except subprocess.TimeoutExpired:
@@ -2835,7 +2838,6 @@ def cleanup_processes():
         for port in all_ports:
             logs = remove_upnp_port_forwarding(port)
             for log in logs:
-                # Strip the STY prefix for cleaner console logging
                 clean_log = log.split(":", 2)[-1] if log.startswith("STY:") else log
                 print(f"   - {clean_log}")
         upnp_mappings.clear()
@@ -2858,7 +2860,7 @@ if __name__ == "__main__":
         signal.signal(signal.SIGTERM, signal_handler)
     except AttributeError:  # SIGTERM may not be available on all Windows versions/Python builds
         print("SIGTERM signal not available on this platform. SIGINT (Ctrl+C) is handled.")
-    except ValueError:  # Can happen if trying to register a signal not supported
+    except ValueError:
         print("Could not register SIGTERM handler. SIGINT (Ctrl+C) is handled.")
 
     # Basic validation
@@ -2883,7 +2885,6 @@ if __name__ == "__main__":
     print(f" - Login with user: {USERNAME}")
     print("Press CTRL+C to stop the server.")
 
-    # Determine SSL context
     ssl_context = None
     if os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH):
         ssl_context = (SSL_CERT_PATH, SSL_KEY_PATH)
@@ -2904,9 +2905,9 @@ if __name__ == "__main__":
             app.run(host=HOST, port=PORT, debug=False, threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt caught in main __name__ block. Ensuring cleanup...")
-        cleanup_processes()  # Ensure cleanup is attempted
+        cleanup_processes()
     finally:
-        if not shutting_down:  # If signal_handler wasn't called or didn't complete
+        if not shutting_down:
             print("Application exiting without explicit signal handling completion. Attempting final cleanup...")
             cleanup_processes()
         print("Finished!")
