@@ -1874,22 +1874,33 @@ HTML_TEMPLATE = """
         .server-name { font-weight: bold; }
         .server-motd { color: var(--server-motd-color); font-size: 0.9em; font-family: 'Minecraftia', monospace; white-space: pre-wrap; word-break: break-all; }
         .server-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-        button, input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
-        button { border: none; cursor: pointer; transition: background-color 0.2s ease; }
+        input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+        .button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            color: white;
+            text-decoration: none;
+            display: inline-block;
+            line-height: normal;
+            vertical-align: middle;
+        }
         input[type="text"], input[type="password"] { border: 1px solid var(--input-border); background-color: var(--input-bg); color: var(--input-text); }
-        .start-button { background-color: #28a745; color: white; }
+        .start-button { background-color: #28a745; }
         .start-button:hover:not(:disabled) { background-color: #218838; }
-        .stop-button { background-color: #dc3545; color: white; }
-        .force-stop-button { background-color: #b32532; color: white; display: none; }
+        .stop-button { background-color: #dc3545; }
+        .force-stop-button { background-color: #b32532; display: none; }
         .stop-button:hover:not(:disabled) { background-color: #c82333; }
-        .command-button { background-color: #007bff; color: white; }
+        .command-button { background-color: #007bff; }
         .command-button:hover:not(:disabled) { background-color: #0056b3; }
-        .logs-button { background-color: #17a2b8; color: white; }
-        .public-button { background-color: #6c757d; color: white; }
-        .logs-button, .public-button { text-decoration: none; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; display: inline-block; line-height: normal; vertical-align: middle; }
+        .logs-button { background-color: #17a2b8; }
+        .public-button { background-color: #6c757d; }
         .logs-button:hover { background-color: #138496; }
         .public-button:hover { background-color: #5a6268; }
-        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .button:disabled { background-color: #cccccc; cursor: not-allowed; }
         .dark-mode button:disabled { background-color: #555; color: #aaa; }
         .status { font-style: italic; color: var(--status-text); font-size: 0.9em; min-width: 80px; text-align: right; }
         .resource-monitor { background-color: rgba(0,0,0,0.1); padding: 5px 10px; border-radius: 4px; margin-top: 10px; cursor: pointer; transition: background-color 0.2s; }
@@ -1961,19 +1972,19 @@ HTML_TEMPLATE = """
                             {% endif %}
                         </div>
                         <div class="server-actions">
-                            <button class="start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
-                            <button class="stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
-                            <button class="force-stop-button" data-server="{{ server }}">Force Stop</button>
-                            <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="logs-button" data-server="{{ server }}">View Logs</a>
-                            <a href="{{ url_for('list_public_files', server_name=server) }}" class="public-button" data-server="{{ server }}">Public Files</a>
-                            <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
-                        </div>
-                    </div>
-                    <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
-                        <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
-                        <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
-                        <button class="command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
-                    </div>
+                           <button class="button start-button" data-server="{{ server }}" {% if server_status.get(server) %}disabled{% endif %}>Start</button>
+                           <button class="button stop-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>Stop</button>
+                           <button class="button force-stop-button" data-server="{{ server }}">Force Stop</button>
+                           <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="button logs-button" data-server="{{ server }}">View Logs</a>
+                           <a href="{{ url_for('list_public_files', server_name=server) }}" class="button public-button" data-server="{{ server }}">Public Files</a>
+                           <span class="status" id="status-{{ server }}">{% if server_status.get(server) %}Running{% else %}Stopped{% endif %}</span>
+                       </div>
+                   </div>
+                   <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) %}flex{% else %}none{% endif %};">
+                       <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
+                       <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
+                       <button class="button command-button" data-server="{{ server }}" {% if not server_status.get(server) %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
+                   </div>
                     <div class="output-container">
                         <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
                             <div class="output-title">Output for {{ server }}:</div>
