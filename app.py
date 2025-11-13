@@ -1907,7 +1907,9 @@ HTML_TEMPLATE = """
         .log-error { color: #e54949; }
         .log-log { color: #90d690; }
         .output-container { position: relative; }
-        .scroll-to-bottom { position: absolute; bottom: 10px; right: 10px; background-color: #007bff; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 24px; cursor: pointer; display: none; }
+        .scroll-to-bottom { position: absolute; bottom: 8px; right: 8px; background-color: rgba(0, 123, 255, 0.6); color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: none; align-items: center; justify-content: center; transition: all 0.2s ease; padding: 0; line-height: 0; }
+        .scroll-to-bottom:hover { background-color: #007bff; transform: scale(1.1); }
+        .scroll-to-bottom svg { width: 16px; height: 16px; }
         .output-title { font-weight: bold; margin-bottom: 5px; color: #bbb; }
         .server-port-display { position: absolute; top: 5px; right: 5px; font-size: 0.8em; font-family: monospace; color: var(--status-text); background-color: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 3px; display: none; z-index: 10; }
         .dark-mode .server-port-display { background-color: rgba(255,255,255,0.05); }
@@ -1976,7 +1978,7 @@ HTML_TEMPLATE = """
                         <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) %}block{% else %}none{% endif %};">
                             <div class="output-title">Output for {{ server }}:</div>
                         </div>
-                        <button class="scroll-to-bottom" id="scroll-{{ server }}">&darr;</button>
+                        <button class="scroll-to-bottom" id="scroll-{{ server }}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg></button>
                     </div>
                     {% if resource_monitor_enabled %}
                     <div class="resource-graph-container" id="resource-graph-container-{{ server }}">
@@ -2446,7 +2448,7 @@ HTML_TEMPLATE = """
                    
                     if (!isAtBottom) {
                         userHasScrolled = true;
-                        scrollToBottomButton.style.display = 'block';
+                        scrollToBottomButton.style.display = 'flex';
                     } else {
                         // If user scrolls back to the bottom, re-enable auto-scrolling
                         userHasScrolled = false;
