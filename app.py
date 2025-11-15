@@ -1139,9 +1139,10 @@ PUBLIC_FILES_LIST_TEMPLATE = """
 
         ::-webkit-scrollbar { width: 12px; height: 12px; }
         ::-webkit-scrollbar-button { display: none; }
-        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.32); }
         ::-webkit-scrollbar-thumb {
-            background-color: rgba(0,0,0,0);
+            background-color: rgba(255,255,255,0.2);
             border-radius: 20px;
             border: 3px solid transparent;
             background-clip: content-box;
@@ -1374,7 +1375,8 @@ SERVER_LOGS_LIST_TEMPLATE = """
 
         ::-webkit-scrollbar { width: 12px; height: 12px; }
         ::-webkit-scrollbar-button { display: none; }
-        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.32); }
         ::-webkit-scrollbar-thumb {
             background-color: rgba(255,255,255,0.2);
             border-radius: 20px;
@@ -1557,7 +1559,8 @@ SERVER_LOG_VIEW_TEMPLATE = """
 
         ::-webkit-scrollbar { width: 12px; height: 12px; }
         ::-webkit-scrollbar-button { display: none; }
-        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.32); }
         ::-webkit-scrollbar-thumb {
             background-color: rgba(255,255,255,0.2);
             border-radius: 20px;
@@ -1846,7 +1849,8 @@ HTML_TEMPLATE = """
 
         ::-webkit-scrollbar { width: 12px; height: 12px; }
         ::-webkit-scrollbar-button { display: none; }
-        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-corner { background: transparent; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.32); }
         ::-webkit-scrollbar-thumb {
             background-color: rgba(255,255,255,0.2);
             border-radius: 20px;
@@ -2878,15 +2882,16 @@ if __name__ == "__main__":
             "INFO: Using a randomly generated SECRET_KEY for this session because FLASK_SECRET_KEY environment variable is not set. For consistent sessions across restarts, set this environment variable or a fixed value in the script."
         )
 
+    ssl_exists = os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH)
     print(f"Starting server control panel...")
     print(f" - Monitoring directory: {SERVERS_BASE_DIR}")
     print(f" - Looking for batch file: {BATCH_FILE_NAME}")
-    print(f" - Access URL: http{'s' if os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH) else ''}://{HOST}:{PORT}")
+    print(f" - Access URL: http{'s' if ssl_exists else ''}://{HOST}:{PORT}")
     print(f" - Login with user: {USERNAME}")
     print("Press CTRL+C to stop the server.")
 
     ssl_context = None
-    if os.path.exists(SSL_CERT_PATH) and os.path.exists(SSL_KEY_PATH):
+    if ssl_exists:
         ssl_context = (SSL_CERT_PATH, SSL_KEY_PATH)
         print(f" - SSL/TLS enabled using {SSL_CERT_PATH} and {SSL_KEY_PATH}")
         print("   (Note: Browser will likely show a warning for self-signed certificates)")
