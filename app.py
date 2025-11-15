@@ -948,7 +948,7 @@ def send_command(server_name):
         return jsonify({"status": "error", "message": "Invalid request format, JSON expected."}), 400
 
     data = request.get_json()
-    command_text = data.get("command")
+    command_text = data.get("command").strip()
     provided_cmd_password = data.get("command_password")
 
     if not command_text or not provided_cmd_password:
@@ -966,15 +966,12 @@ def send_command(server_name):
 
     try:
         # Ensure command ends with a newline, as most console apps expect this
-        if not command_text.endswith("\n"):
-            command_text += "\n"
-
-        process.stdin.write(command_text.encode("utf-8"))
+        process.stdin.write(f"{command_text}\n".encode("utf-8"))
         process.stdin.flush()  # Ensure it's sent immediately
 
         # Log the command to the server's output display as well
         with process_info["lock"]:
-            process_info["output"].append(f"STY:stdin:{command_text.strip()}")
+            process_info["output"].append(f"STY:stdin:{command_text}")
 
         return jsonify({"status": "success", "message": "Command sent."})
     except Exception as e:
@@ -2142,8 +2139,6 @@ HTML_TEMPLATE = """
                 const statusSpan = item.querySelector('.status');
                 const outputArea = item.querySelector('.output-area');
                 const commandSection = item.querySelector('.command-section');
-                const commandInput = item.querySelector('.command-input');
-                const commandPasswordInput = item.querySelector('.command-password-input');
                 const commandButton = item.querySelector('.command-button');
                 const resourceMonitor = item.querySelector('.resource-monitor');
 
@@ -2162,16 +2157,14 @@ HTML_TEMPLATE = """
                     });
                 }
 
-
-                if (commandInput) {
-                    commandInput.addEventListener('keydown', (event) => {
+                if (commandSection) {
+                    commandSection.addEventListener('keydown', (event) => {
                         if (event.key === 'Enter') {
                             event.preventDefault();
                             handleSendCommand(serverName);
                         }
                     });
                 }
- 
  
                 // --- Initial State ---
                 if (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...') {
