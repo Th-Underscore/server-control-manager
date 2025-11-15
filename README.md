@@ -170,3 +170,4 @@ SERVERS_BASE_DIR/
     - Add more UPnP configuration options (e.g., RCON port offset)
     - Add more robust UPnP mapping logic (e.g., delete old mappings on port conflict)
 - Add a proper logging setup for server-control-manager itself (separate from per-server logs)
+- API
