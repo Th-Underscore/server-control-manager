@@ -1238,8 +1238,8 @@ PUBLIC_FILES_LIST_TEMPLATE = """
 """
 
 
-@app.route("/public/<server_name>/", defaults={"subpath": ""})
-@app.route("/public/<server_name>/<path:subpath>")
+@app.route("/server/<server_name>/public/", defaults={"subpath": ""})
+@app.route("/server/<server_name>/public/<path:subpath>")
 @login_required
 def list_public_files(server_name, subpath):
     """Lists files and directories in the server's public folder."""
