@@ -2066,7 +2066,7 @@ HTML_TEMPLATE = """
                    <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}flex{% else %}none{% endif %};">
                        <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
                        <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
-                       <button class="button command-button" data-server="{{ server }}" {% if server_status.get(server) != 'Running' %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
+                       <button class="button command-button" data-server="{{ server }}" {% if server_status.get(server) not in ['Running', 'Started'] %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
                    </div>
                     <div class="output-container">
                         <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}block{% else %}none{% endif %};">
@@ -2246,7 +2246,8 @@ HTML_TEMPLATE = """
                 }
 
                 // --- Initial State ---
-                if (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...') {
+                const currentText = statusSpan.textContent.trim();
+                if (['Running', 'Started', 'Starting', 'Stopping', 'Stopping...'].includes(currentText) || currentText.includes('Starting')) {
                     startListening(serverName);
                     const portDisplay = item.querySelector('.server-port-display');
                     if (portDisplay) portDisplay.style.display = 'block';
@@ -2262,7 +2263,8 @@ HTML_TEMPLATE = """
                         const serverName = item.id.replace('server-', '');
                         const statusSpan = item.querySelector('.status');
 
-                        if (statusSpan && (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...' || statusSpan.textContent === 'Starting...')) {
+                        const txt = statusSpan.textContent.trim();
+                        if (statusSpan && ['Running', 'Started', 'Starting', 'Stopping', 'Stopping...'].includes(txt)) {
                             const es = eventSources[serverName];
                             // 0=CONNECTING, 1=OPEN, 2=CLOSED
                             if (!es || es.readyState === 2) {
