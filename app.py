@@ -8,6 +8,7 @@ import secrets
 import shutil
 import signal
 import socket
+import struct
 
 try:
     import miniupnpc
@@ -319,7 +320,43 @@ def update_server_properties_port(server_path, new_port):
         return False, f"Error writing updated properties: {e}"
 
 
-# --- Helper Functions (get_server_folders, read_process_output - unchanged from previous version) ---
+# --- Helper Functions ---
+def ping_minecraft_server(host, port, timeout=1.0):
+    """
+    Pings a Minecraft server using the standard Server List Ping protocol (SLP).
+    Returns True if the server responds, False otherwise.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect((host, int(port)))
+
+            # Handshake Packet
+            # Packet ID 0x00, Protocol -1 (varint), Host (string), Port (unsigned short), Next State 1 (status)
+            host_bytes = host.encode('utf-8')
+
+            def pack_varint(d):
+                o = b''
+                while True:
+                    b = d & 0x7F
+                    d >>= 7
+                    o += struct.pack("B", b | (0x80 if d > 0 else 0))
+                    if d == 0: break
+                return o
+
+            data = b'\x00' + pack_varint(-1 & 0xFFFFFFFF) + pack_varint(len(host_bytes)) + host_bytes + struct.pack('>H', int(port)) + pack_varint(1)
+            packet = pack_varint(len(data)) + data
+            sock.sendall(packet)
+            sock.sendall(b'\x01\x00')  # Confirmation
+
+            # Even a single byte confirms life
+            response = sock.recv(1)
+            if not response:
+                return False
+            return True
+    except Exception:
+        return False
+
 def get_server_folders():
     """Finds valid server folders in the base directory."""
     servers = []
@@ -571,15 +608,15 @@ def index():
         }
 
     # Pass server status (running, stopping, or stopped) to the template
-    server_status = {}
+        server_status = {}
     for server_name in servers:
         proc_info = running_processes.get(server_name)
-        status = "Stopped"  # Default
+        status = "Stopped"
         if proc_info and proc_info.get("process") and proc_info["process"].poll() is None:
             if proc_info.get("stop_requested"):
                 status = "Stopping"
             else:
-                status = "Running"
+                status = proc_info.get("minecraft_status", "Starting")
         server_status[server_name] = status
 
     return render_template_string(
@@ -692,6 +729,8 @@ def start_server(server_name):
             "output": pre_start_logs,
             "lock": new_lock,
             "stop_requested": False,
+            "port": port_to_return,
+            "minecraft_status": "Starting",
             "resources": {  # Initialize with empty deques
                 "cpu": deque(maxlen=MAX_RESOURCE_HISTORY),
                 "ram": deque(maxlen=MAX_RESOURCE_HISTORY),
@@ -888,8 +927,10 @@ def stream_output(server_name):
         last_resource_timestamp_sent = 0
 
         last_sent_time = time.time()
+        last_status_sent = None
         while True:
             resource_payload = None
+            current_status = "Stopped"
             with process_info["lock"]:
                 current_len = len(process_info["output"])
                 new_lines = process_info["output"][last_index:current_len]
@@ -910,12 +951,24 @@ def stream_output(server_name):
                 process_obj = process_info.get("process")
                 process_running = process_obj is not None and process_obj.poll() is None
                 stop_req = process_info.get("stop_requested", False)
+                
+                if not process_running:
+                    current_status = "Stopped"
+                else:
+                    if stop_req:
+                        current_status = "Stopping"
+                    else:
+                        current_status = process_info.get("minecraft_status", "Starting")
 
             if new_lines:
                 for line in new_lines:
                     yield f"event: message\ndata: {line}\n\n"
                 last_index = current_len
                 last_sent_time = time.time()
+
+            if current_status != last_status_sent:
+                yield f"event: status\ndata: {current_status}\n\n"
+                last_status_sent = current_status
 
             if resource_payload:
                 yield f"event: resources\ndata: {resource_payload}\n\n"
@@ -927,8 +980,7 @@ def stream_output(server_name):
 
             # Send final status and close
             if not process_running:
-                status_message = "Stopped" if stop_req else "Finished"
-                yield f"event: status\ndata: {status_message}\n\n"
+                yield f"event: status\ndata: Stopped\n\n"
                 yield "event: close\ndata: Stream closing\n\n"
                 break  # Stop streaming
 
@@ -982,15 +1034,29 @@ def send_command(server_name):
 
 
 def monitor_process_resources(server_name, pid):
-    """Monitors CPU and RAM usage for a given process PID and all its children."""
+    """Monitors CPU/RAM and Pings the Minecraft Server Status."""
     global running_processes
     try:
         parent_proc = psutil.Process(pid)
-        # Store Process objects to maintain the state required for cpu_percent(interval=None)
         tracked_procs = {}
 
         while server_name in running_processes and running_processes[server_name].get("process"):
             process_info = running_processes[server_name]
+
+            # --- Status Check Logic ---
+            if not process_info.get("stop_requested"):
+                port = process_info.get("port")
+                if port:
+                    is_online = ping_minecraft_server("127.0.0.1", port)
+                    with process_info["lock"]:
+                        if is_online:
+                            process_info["minecraft_status"] = "Started"
+                        else:
+                            if process_info.get("minecraft_status") == "Started":
+                                pass  # Could add a "Lagging" state here
+                            else:
+                                process_info["minecraft_status"] = "Starting"
+
             if not parent_proc.is_running() or process_info["process"].poll() is not None:
                 break
 
@@ -999,14 +1065,13 @@ def monitor_process_resources(server_name, pid):
 
             current_procs_in_tree: dict[str, psutil.Process] = {}
             try:
-                # Get all processes in the tree for this polling cycle
                 all_procs_list = [parent_proc] + parent_proc.children(recursive=True)
                 for p in all_procs_list:
                     current_procs_in_tree[p.pid] = p
             except psutil.NoSuchProcess:
                 break
 
-            # Add newly spawned processes to our tracking dictionary and initialize them
+            # Add newly spawned processes to tracking dictionary and initialize them
             for pid, proc in current_procs_in_tree.items():
                 if pid not in tracked_procs:
                     proc.cpu_percent(interval=None)  # First call is for initialization
@@ -1017,7 +1082,7 @@ def monitor_process_resources(server_name, pid):
                 if pid not in current_procs_in_tree:
                     del tracked_procs[pid]
 
-            # Calculate total resource usage from our tracked, stateful Process objects
+            # Calculate total resource usage from tracked, stateful Process objects
             for pid, proc in tracked_procs.items():
                 try:
                     if proc.is_running():
@@ -1027,7 +1092,7 @@ def monitor_process_resources(server_name, pid):
                     continue
 
             with process_info["lock"]:
-                timestamp = time.time() * 1000  # Use milliseconds for JS charts
+                timestamp = time.time() * 1000  # Milliseconds for JS charts
                 if "resources" not in process_info:
                     process_info["resources"] = {
                         "cpu": deque(maxlen=MAX_RESOURCE_HISTORY),
@@ -1038,11 +1103,11 @@ def monitor_process_resources(server_name, pid):
 
             time.sleep(RESOURCE_MONITOR_INTERVAL)
     except psutil.NoSuchProcess:
-        print(f"Resource monitor for {server_name} (PID: {pid}) exiting: Process not found.")
+        pass
     except Exception as e:
-        print(f"Error in resource monitor for {server_name} (PID: {pid}): {e}")
+        print(f"Error in monitor for {server_name}: {e}")
     finally:
-        print(f"Resource monitoring thread finished for {server_name}")
+        pass
 
 
 @app.route("/resources/<server_name>")
@@ -1878,6 +1943,13 @@ HTML_TEMPLATE = """
         .server-name { font-weight: bold; }
         .server-motd { color: var(--server-motd-color); font-size: 0.9em; font-family: 'Minecraftia', monospace; white-space: pre-wrap; word-break: break-all; }
         .server-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .status { display: flex; align-items: center; justify-content: flex-start; min-width: 110px; font-style: italic; color: var(--status-text); font-size: 0.9em; margin-left: 10px; }
+        .status-dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-right: 8px; flex-shrink: 0; }
+        .status-dot.starting { background-color: #ffc107; animation: pulse 1s infinite; }
+        .status-dot.started { background-color: #28a745; }
+        .status-dot.stopping { background-color: #dc3545; animation: pulse 0.5s infinite; }
+        .status-dot.stopped { background-color: #6c757d; opacity: 0.5; }
+        @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
         input[type="text"], input[type="password"] { padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
         .button {
             padding: 8px 12px;
@@ -1969,28 +2041,35 @@ HTML_TEMPLATE = """
                                 <span class="server-motd" data-motd="{{ server_details[server]['motd'] }}">{{ server_details[server]['motd'] }}</span>
                             </div>
                             {% if resource_monitor_enabled %}
-                            <div class="resource-monitor" id="resource-monitor-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}block{% else %}none{% endif %};">
+                            <div class="resource-monitor" id="resource-monitor-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}block{% else %}none{% endif %};">
                                 <span class="resource-item">CPU: <b id="cpu-{{ server }}">0.0</b>%</span>
                                 <span class="resource-item">RAM: <b id="ram-{{ server }}">0 MB</b></span>
                             </div>
                             {% endif %}
                         </div>
                         <div class="server-actions">
-                           <button class="button start-button" data-server="{{ server }}" {% if server_status.get(server) in ['Running', 'Stopping'] %}disabled{% endif %}>Start</button>
-                           <button class="button stop-button" data-server="{{ server }}" {% if server_status.get(server) != 'Running' %}disabled{% endif %}>Stop</button>
+                           <button class="button start-button" data-server="{{ server }}" {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}disabled{% endif %}>Start</button>
+                           <button class="button stop-button" data-server="{{ server }}" {% if server_status.get(server) not in ['Running', 'Started', 'Starting'] %}disabled{% endif %}>Stop</button>
                            <button class="button force-stop-button" data-server="{{ server }}" style="display: {% if server_status.get(server) == 'Stopping' %}inline-block{% else %}none{% endif %};">Force Stop</button>
                            <a href="{{ url_for('list_server_logs_default', server_name=server) }}" class="button logs-button" data-server="{{ server }}">View Logs</a>
                            <a href="{{ url_for('list_public_files', server_name=server) }}" class="button public-button" data-server="{{ server }}">Public Files</a>
-                           <span class="status" id="status-{{ server }}">{% set status = server_status.get(server, 'Stopped') %}{% if status == 'Stopping' %}Stopping...{% else %}{{ status }}{% endif %}</span>
+                           <span class="status" id="status-{{ server }}">
+                                {% set status = server_status.get(server, 'Stopped') %}
+                                {% set status_class = status.lower() %}
+                                {% if status == 'Starting' %}{% set status_class = 'starting' %}{% endif %}
+                                {% if status == 'Running' %}{% set status_class = 'starting' %}{% endif %}
+                                <span class="status-dot {{ status_class }}" id="dot-{{ server }}"></span>
+                                <span id="text-{{ server }}">{{ status }}</span>
+                            </span>
                        </div>
                    </div>
-                   <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}flex{% else %}none{% endif %};">
+                   <div class="command-section" id="command-section-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}flex{% else %}none{% endif %};">
                        <input type="text" class="command-input" data-server="{{ server }}" placeholder="Enter command...">
                        <input type="password" class="command-password-input" data-server="{{ server }}" placeholder="Cmd Password...">
                        <button class="button command-button" data-server="{{ server }}" {% if server_status.get(server) != 'Running' %}disabled{% endif %}>&#10148;&#xFE0E; Send</button>
                    </div>
                     <div class="output-container">
-                        <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping'] %}block{% else %}none{% endif %};">
+                        <div class="output-area" id="output-{{ server }}" style="display: {% if server_status.get(server) in ['Running', 'Stopping', 'Starting', 'Started'] %}block{% else %}none{% endif %};">
                             <div class="output-title">Output for {{ server }}:</div>
                         </div>
                         <button class="scroll-to-bottom" id="scroll-{{ server }}"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 4a.5.5 0 0 1 .5.5v5.793l2.146-2.147a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 1 1 .708-.708L7.5 10.293V4.5A.5.5 0 0 1 8 4z"/></svg></button>
@@ -2041,7 +2120,7 @@ HTML_TEMPLATE = """
                 const parts = motd.split(/(§[0-9a-fk-or])/);
                 let html = '';
                 let openSpans = 0;
-                
+
                 const closeSpans = () => {
                     while (openSpans > 0) {
                         html += '</span>';
@@ -2077,7 +2156,7 @@ HTML_TEMPLATE = """
                 closeSpans();
                 return html;
             }
-            
+
             function obfuscateText() {
                 // Find all elements that need to be garbled.
                 const elements = document.querySelectorAll('.minecraft-obfuscated');
@@ -2165,7 +2244,7 @@ HTML_TEMPLATE = """
                         }
                     });
                 }
- 
+
                 // --- Initial State ---
                 if (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Stopping...') {
                     startListening(serverName);
@@ -2173,7 +2252,7 @@ HTML_TEMPLATE = """
                     if (portDisplay) portDisplay.style.display = 'block';
                 }
             });
-            
+
             obfuscateText();
 
             document.addEventListener('visibilitychange', () => {
@@ -2456,7 +2535,7 @@ HTML_TEMPLATE = """
                     // If user scrolls up, disable auto-scrolling and show the button
                     const isAtBottom = outputArea.scrollHeight - outputArea.clientHeight <= outputArea.scrollTop + 1;
                     const scrollToBottomButton = document.getElementById(`scroll-${serverName}`);
-                   
+
                     if (!isAtBottom) {
                         userHasScrolled = true;
                         scrollToBottomButton.style.display = 'flex';
@@ -2575,7 +2654,8 @@ HTML_TEMPLATE = """
                 const startButton = item.querySelector('.start-button');
                 const stopButton = item.querySelector('.stop-button');
                 const forceStopButton = item.querySelector('.force-stop-button');
-                const statusSpan = item.querySelector('.status');
+                const statusDot = document.getElementById(`dot-${serverName}`); // NEW
+                const statusTextSpan = document.getElementById(`text-${serverName}`); // NEW
                 const outputArea = item.querySelector('.output-area');
                 const commandSection = item.querySelector('.command-section');
                 const commandButton = item.querySelector('.command-button');
@@ -2586,20 +2666,61 @@ HTML_TEMPLATE = """
                 const portDisplay = item.querySelector('.server-port-display');
 
 
-                statusSpan.textContent = statusText;
+                // Normalize input text for CSS classes
+                let cssClass = 'stopped';
+                let normalizedText = statusText;
 
+                // Map status text to CSS classes and Logic States
+                const textLower = statusText.toLowerCase();
+                if (textLower.includes('starting')) {
+                    cssClass = 'starting';
+                    state = 'starting';
+                } else if (textLower === 'started' || textLower === 'running') {
+                    cssClass = 'started';
+                    state = 'running';
+                    normalizedText = "Started";
+                } else if (textLower.includes('stopping') || textLower.includes('forcing')) { // includes() to catch "Stopping...", "Forcing Stop...", etc.
+                    cssClass = 'stopping';
+                    state = 'stopping';
+                } else {
+                    cssClass = 'stopped';
+                    state = 'stopped';
+                }
+
+                // Update Visuals
+                if (statusDot) {
+                    statusDot.className = `status-dot ${cssClass}`;
+                }
+                if (statusTextSpan) {
+                    statusTextSpan.textContent = normalizedText;
+                }
+
+                // Update Controls (Enable/Disable buttons based on 'state')
                 switch (state) {
-                    case 'running':
+                    case 'running': // Process running
                         startButton.disabled = true;
                         stopButton.disabled = false;
                         if (forceStopButton) forceStopButton.style.display = 'none';
                         outputArea.style.display = 'block';
+                        if(commandSection) commandSection.style.display = 'flex';
                         if(commandSection) commandSection.style.display = 'flex';
                         if(commandButton) commandButton.disabled = false;
                         if(commandInput) commandInput.disabled = false;
                         if(commandPasswordInput) commandPasswordInput.disabled = false;
                         if(resourceMonitor) resourceMonitor.style.display = 'block';
                         if(portDisplay) portDisplay.style.display = 'block';
+                        break;
+                    case 'starting':
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        // if (forceStopButton) forceStopButton.style.display = 'none';
+                        outputArea.style.display = 'block';
+                        // if(commandSection) commandSection.style.display = 'none';
+                        break;
+                    case 'stopping':
+                        startButton.disabled = true;
+                        stopButton.disabled = true;
+                        if(commandSection) commandSection.style.display = 'none';
                         break;
                     case 'stopped':
                         startButton.disabled = false;
@@ -2610,23 +2731,8 @@ HTML_TEMPLATE = """
                         if(commandInput) commandInput.disabled = true;
                         if(commandPasswordInput) commandPasswordInput.disabled = true;
                         if(portDisplay) portDisplay.style.display = 'none';
-                        // Keep the resource monitor and graph visible in their last state.
-                        // The user can still interact with them (e.g., close the graph).
-                        // Keep output area visible after run
-                        break;
-                    case 'starting':
-                    case 'stopping':
-                        startButton.disabled = true;
-                        stopButton.disabled = true;
-                        if(commandButton) commandButton.disabled = true;
-                        if(commandInput) commandInput.disabled = true;
-                        if(commandPasswordInput) commandPasswordInput.disabled = true;
-                        if(portDisplay) portDisplay.style.display = 'block';
-                        if(commandSection && state === 'stopping') {
-                            // Keep command section visible during stopping if it was already visible
-                        } else if (commandSection) {
-                            commandSection.style.display = 'none';
-                        }
+                        // Keep the resource monitor and graph visible in their last state
+                        // The user can still interact with them (e.g., close the graph)
                         break;
                 }
             }
