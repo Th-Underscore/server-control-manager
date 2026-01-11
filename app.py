@@ -321,39 +321,71 @@ def update_server_properties_port(server_path, new_port):
 
 
 # --- Helper Functions ---
-def ping_minecraft_server(host, port, timeout=1.0):
+def ping_minecraft_server(host, port, timeout=1.5):
     """
-    Pings a Minecraft server using the standard Server List Ping protocol (SLP).
-    Returns True if the server responds, False otherwise.
+    Pings a Minecraft server using the standard Server List Ping protocol (SLP). Reads the full JSON response to distinguish between a 'Starting' disconnect message and a 'Ready' status response.
     """
+    def read_varint(sock):
+        d = 0
+        for i in range(5):
+            b = sock.recv(1)
+            if not b: raise Exception("Socket closed")
+            b = ord(b)
+            d |= (b & 0x7F) << (7 * i)
+            if not b & 0x80:
+                return d
+        raise Exception("VarInt too big")
+
+    def pack_varint(d):
+        o = b''
+        while True:
+            b = d & 0x7F
+            d >>= 7
+            o += struct.pack("B", b | (0x80 if d > 0 else 0))
+            if d == 0: break
+        return o
+
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             sock.connect((host, int(port)))
 
-            # Handshake Packet
+            # Handshake
             # Packet ID 0x00, Protocol -1 (varint), Host (string), Port (unsigned short), Next State 1 (status)
             host_bytes = host.encode('utf-8')
+            handshake_data = (
+                b'\x00' +
+                pack_varint(-1 & 0xFFFFFFFF) +
+                pack_varint(len(host_bytes)) +
+                host_bytes +
+                struct.pack('>H', int(port)) +
+                pack_varint(1)
+            )
+            sock.sendall(pack_varint(len(handshake_data)) + handshake_data)
 
-            def pack_varint(d):
-                o = b''
-                while True:
-                    b = d & 0x7F
-                    d >>= 7
-                    o += struct.pack("B", b | (0x80 if d > 0 else 0))
-                    if d == 0: break
-                return o
+            sock.sendall(b'\x01\x00')
 
-            data = b'\x00' + pack_varint(-1 & 0xFFFFFFFF) + pack_varint(len(host_bytes)) + host_bytes + struct.pack('>H', int(port)) + pack_varint(1)
-            packet = pack_varint(len(data)) + data
-            sock.sendall(packet)
-            sock.sendall(b'\x01\x00')  # Confirmation
+            _ = read_varint(sock)
+            packet_id = read_varint(sock)
+            if packet_id != 0: return False
 
-            # Even a single byte confirms life
-            response = sock.recv(1)
-            if not response:
-                return False
-            return True
+            # Parse JSON string
+            json_len = read_varint(sock)
+            data = b''
+            while len(data) < json_len:
+                chunk = sock.recv(json_len - len(data))
+                if not chunk: break
+                data += chunk
+            response_str = data.decode('utf-8', errors='ignore')
+            response_json = json.loads(response_str)
+
+            # Validate content
+            # A "Ready" server sends: {'version': {...}, 'players': {...}, 'description': ...}
+            if "version" in response_json and "players" in response_json:
+                return True
+
+            return False
+
     except Exception:
         return False
 
@@ -2796,7 +2828,14 @@ HTML_TEMPLATE = """
 
                 // Update Controls (Enable/Disable buttons based on 'state')
                 switch (state) {
-                    case 'running': // Process running
+                    case 'starting':
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        // if (forceStopButton) forceStopButton.style.display = 'none';
+                        outputArea.style.display = 'block';
+                        // if(commandSection) commandSection.style.display = 'none';
+                        break;
+                    case 'running':  // "Started"
                         startButton.disabled = true;
                         stopButton.disabled = false;
                         if (forceStopButton) forceStopButton.style.display = 'none';
@@ -2808,13 +2847,6 @@ HTML_TEMPLATE = """
                         if(commandPasswordInput) commandPasswordInput.disabled = false;
                         if(resourceMonitor) resourceMonitor.style.display = 'block';
                         if(portDisplay) portDisplay.style.display = 'block';
-                        break;
-                    case 'starting':
-                        startButton.disabled = true;
-                        stopButton.disabled = false;
-                        // if (forceStopButton) forceStopButton.style.display = 'none';
-                        outputArea.style.display = 'block';
-                        // if(commandSection) commandSection.style.display = 'none';
                         break;
                     case 'stopping':
                         startButton.disabled = true;
