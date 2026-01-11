@@ -596,15 +596,35 @@ def index():
     """Serves the main control panel page."""
     servers = get_server_folders()
     server_details = {}
+
     for server_name in servers:
         server_path = os.path.join(SERVERS_BASE_DIR, server_name)
         properties = get_server_properties(server_path)
         icon = get_server_icon(server_path)
+
+        # Date created
+        try:
+            stat = os.stat(server_path)
+            created_time = getattr(stat, 'st_birthtime', stat.st_ctime)
+        except Exception:
+            created_time = 0
+
+        # Last started
+        last_started_time = 0
+        latest_log_path = os.path.join(server_path, "logs", "latest.log")
+        if os.path.isfile(latest_log_path):
+            try:
+                last_started_time = os.path.getmtime(latest_log_path)
+            except Exception:
+                pass
+
         server_details[server_name] = {
             "motd": properties.get("motd", "No MOTD found"),
             "version": properties.get("version", ""),
             "icon": icon,
             "port": properties.get("server-port", "N/A"),
+            "created": created_time,
+            "last_started": last_started_time,
         }
 
     # Pass server status (running, stopping, or stopped) to the template
@@ -951,7 +971,7 @@ def stream_output(server_name):
                 process_obj = process_info.get("process")
                 process_running = process_obj is not None and process_obj.poll() is None
                 stop_req = process_info.get("stop_requested", False)
-                
+
                 if not process_running:
                     current_status = "Stopped"
                 else:
@@ -1988,7 +2008,7 @@ HTML_TEMPLATE = """
         .command-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .command-section input[type="text"], .command-section input[type="password"] { flex-grow: 1; min-width: 150px; }
         .output-area { background-color: #222; color: #eee; font-family: 'Courier New', Courier, monospace; padding: 15px; border-radius: 5px; margin-top: 10px; height: 300px; overflow-y: scroll; white-space: pre-wrap; font-size: 0.85em; border: 1px solid #444; word-break: break-all; }
-        .output-area p { margin: 0 0 2px 0; padding: 0; line-height: 1.3; }
+        .output-area div { margin: 0; padding: 0; line-height: 1.4; }
         .log-stdin { color: #e5e549; }
         .log-marker { color: #7bb5b5; }
         .log-error { color: #e54949; }
@@ -2026,11 +2046,28 @@ HTML_TEMPLATE = """
         {% endwith %}
 
         <h1>Server Control Panel</h1>
-        <h2>Available Servers</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 20px;">
+            <h2 style="border:none; margin:0; padding:0;">Available Servers</h2>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <label for="sort-select">Sort by:</label>
+                <select id="sort-select" style="padding: 5px; border-radius: 4px; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--input-text);">
+                    <option value="name">Name</option>
+                    <option value="last_started">Last Started</option>
+                    <option value="created">Date Created</option>
+                </select>
+                <button id="sort-direction" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--input-border); background: var(--button-bg); color: white; cursor: pointer;" title="Toggle Ascending/Descending">
+                    ⬇
+                </button>
+            </div>
+        </div>
         <ul class="server-list">
             {% if servers %}
                 {% for server in servers %}
-                <li class="server-item" id="server-{{ server }}">
+                <li class="server-item"
+                    id="server-{{ server }}"
+                    data-name="{{ server|lower }}"
+                    data-created="{{ server_details[server]['created'] }}"
+                    data-last-started="{{ server_details[server]['last_started'] }}">
                     <div class="server-controls">
                         <div class="server-details-container">
                             {% if server_details[server]['icon'] %}
@@ -2102,6 +2139,66 @@ HTML_TEMPLATE = """
 
         // --- JavaScript for handling buttons and SSE (Server-Sent Events) ---
         document.addEventListener('DOMContentLoaded', () => {
+            // --- Sorting Logic ---
+            const serverList = document.querySelector('.server-list');
+            const sortSelect = document.getElementById('sort-select');
+            const sortDirectionBtn = document.getElementById('sort-direction');
+
+            let sortDirection = localStorage.getItem('serverSortDirection') || 'desc'; // 'asc' or 'desc'
+            let currentSort = localStorage.getItem('serverSortType') || 'name'; // 'name', 'last_started', 'created'
+
+            function updateDirectionBtn() {
+                sortDirectionBtn.textContent = sortDirection === 'asc' ? '⬆' : '⬇';
+            }
+
+            function sortServers() {
+                const items = Array.from(serverList.children);
+                const serverItems = items.filter(item => item.classList.contains('server-item'));
+                if (serverItems.length === 0) return;
+
+                serverItems.sort((a, b) => {
+                    let valA, valB;
+
+                    if (currentSort === 'name') {
+                        valA = a.dataset.name;
+                        valB = b.dataset.name;
+                        return sortDirection === 'asc'
+                            ? valA.localeCompare(valB)
+                            : valB.localeCompare(valA);
+                    } else {
+                        // Numeric sorts (created, last_started)
+                        // Use 0 as fallback if undefined to push to bottom
+                        valA = parseFloat(a.dataset[currentSort.replace('_', '')] || a.getAttribute(`data-${currentSort.replace('_','-')}`)) || 0;
+                        valB = parseFloat(b.dataset[currentSort.replace('_', '')] || b.getAttribute(`data-${currentSort.replace('_','-')}`)) || 0;
+
+                        return sortDirection === 'asc' ? valA - valB : valB - valA;
+                    }
+                });
+
+                serverItems.forEach(item => serverList.appendChild(item));
+
+                // Save preferences
+                localStorage.setItem('serverSortType', currentSort);
+                localStorage.setItem('serverSortDirection', sortDirection);
+            }
+
+            // Event Listeners
+            sortSelect.addEventListener('change', (e) => {
+                currentSort = e.target.value;
+                sortServers();
+            });
+
+            sortDirectionBtn.addEventListener('click', () => {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                updateDirectionBtn();
+                sortServers();
+            });
+
+            // Initialize
+            if (currentSort) sortSelect.value = currentSort;
+            updateDirectionBtn();
+            sortServers();
+
             function parseMotd(motd) {
                 const colorMap = {
                     '0': '#000000', '1': '#000077', '2': '#007700', '3': '#007777',
@@ -2577,7 +2674,7 @@ HTML_TEMPLATE = """
                 });
 
                 es.addEventListener('message', event => {
-                    const line = document.createElement('p');
+                    const line = document.createElement('div');
                     const message = event.data;
 
                     // Check for our special style prefix
