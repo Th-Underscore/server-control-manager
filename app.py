@@ -783,7 +783,7 @@ def start_server(server_name):
             "stop_requested": False,
             "port": port_to_return,
             "minecraft_status": "Starting",
-            "resources": {  # Initialize with empty deques
+            "resources": {  # Initialize empty
                 "cpu": deque(maxlen=MAX_RESOURCE_HISTORY),
                 "ram": deque(maxlen=MAX_RESOURCE_HISTORY),
             },
@@ -2541,8 +2541,9 @@ HTML_TEMPLATE = """
                 })
                 .finally(() => {
                     // Re-enable button only if server is still running
-                    const statusSpan = document.getElementById(`status-${serverName}`);
-                    if (statusSpan && (statusSpan.textContent === 'Running' || statusSpan.textContent === 'Starting...')) {
+                    const statusSpan = document.getElementById(`status-${serverName}`)?.textContent?.trim();
+                    console.debug(`Status for ${serverName}: ${statusSpan}`);
+                    if (statusSpan && (statusSpan  === 'Running' || statusSpan === 'Starting...' || statusSpan === 'Started')) {
                         commandButton.disabled = false;
                     }
                 });
