@@ -158,11 +158,11 @@ SERVERS_BASE_DIR/
 - Persist server state (e.g., PID files) to allow the panel to reconnect to processes that are still running after a panel restart
 - Feature enhancements
     - Add output logging for inputted commands
-    - Upgrade backup management (e.g., daily, monthly, etc.; delete old ones, etc.)
+    - Upgrade backup management (e.g., daily, monthly, etc.; delete old ones, etc.) \[BackupManager class\]
     - Add a server configuration editor (e.g., for `server.properties`)
     - Implement pagination/streaming for viewing large log files to reduce memory usage
     - Add a file manager for server directories with upload/delete capabilities
-    - Add a "Restore Backup" feature in the UI
+    - Add a "Restore Backup" feature in the UI (also keep copy of current state)
     - Implement scheduled tasks (e.g., daily restarts, timed commands)
     - Add API endpoints for programmatic control (e.g., webhooks)
     - Add server ordering (by date created, last open, etc.)
@@ -171,3 +171,4 @@ SERVERS_BASE_DIR/
     - Add more robust UPnP mapping logic (e.g., delete old mappings on port conflict)
 - Add a proper logging setup for server-control-manager itself (separate from per-server logs)
 - API
+- Dynamic voice chat port (24454)
