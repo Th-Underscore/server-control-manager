@@ -1275,8 +1275,11 @@ PUBLIC_FILES_LIST_TEMPLATE = """
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--table-border); }
         th { background-color: var(--th-bg); }
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { background-color: var(--navbar-hover); color: var(--navbar-text); }
         td a { text-decoration: none; color: var(--link-color); display: block; }
         td a:hover { text-decoration: underline; }
+        .sort-indicator { margin-left: 4px; font-size: 0.8em; }
         .back-link { display: inline-block; margin-top: 20px; padding: 8px 15px; background-color: var(--button-bg); color: white; border-radius: 4px; text-decoration: none; }
         .back-link:hover { background-color: var(--button-hover-bg); }
         .icon { margin-right: 8px; }
@@ -1297,18 +1300,19 @@ PUBLIC_FILES_LIST_TEMPLATE = """
     <div class="container">
         <h1>Public Files for: {{ server_name }}</h1>
         <div class="path-display">Current Path: /public/{{ current_path }}</div>
-        <table>
+        <table id="public-files-table">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Last Modified</th>
+                    <th data-sort="name" class="sortable">Name<span class="sort-indicator"></span></th>
+                    <th data-sort="size" class="sortable">Size<span class="sort-indicator"></span></th>
+                    <th data-sort="modified" class="sortable">Last Modified<span class="sort-indicator"></span></th>
+                    <th data-sort="created" class="sortable">Date Created<span class="sort-indicator"></span></th>
                 </tr>
             </thead>
             <tbody>
                 {% if parent_path is not none %}
-                <tr>
-                    <td colspan="3">
+                <tr class="parent-row">
+                    <td colspan="4">
                         <a href="{{ url_for('list_public_files', server_name=server_name, subpath=parent_path) }}">
                             <span class="icon">&#128193;</span>../ (Parent Directory)
                         </a>
@@ -1316,16 +1320,19 @@ PUBLIC_FILES_LIST_TEMPLATE = """
                 </tr>
                 {% endif %}
                 {% for dir in directories %}
-                <tr>
-                    <td colspan="3">
+                <tr class="dir-row" data-name="{{ dir.name|lower }}" data-size="-1" data-modified="{{ dir.modified_ts }}" data-created="{{ dir.created_ts }}">
+                    <td>
                         <a href="{{ url_for('list_public_files', server_name=server_name, subpath=dir.path) }}">
                             <span class="icon">&#128193;</span>{{ dir.name }}/
                         </a>
                     </td>
+                    <td>-</td>
+                    <td>{{ dir.modified }}</td>
+                    <td>{{ dir.created }}</td>
                 </tr>
                 {% endfor %}
                 {% for file in files %}
-                <tr>
+                <tr class="file-row" data-name="{{ file.name|lower }}" data-size="{{ file.size_bytes }}" data-modified="{{ file.modified_ts }}" data-created="{{ file.created_ts }}">
                     <td>
                         <a href="{{ url_for('download_public_file', server_name=server_name, path=file.path) }}" target="_blank">
                         <span class="icon">&#128196;</span>{{ file.name }}
@@ -1333,6 +1340,7 @@ PUBLIC_FILES_LIST_TEMPLATE = """
                     </td>
                     <td>{{ file.size_human }}</td>
                     <td>{{ file.modified }}</td>
+                    <td>{{ file.created }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -1343,6 +1351,79 @@ PUBLIC_FILES_LIST_TEMPLATE = """
         <a href="{{ url_for('index') }}" class="back-link">Back to Main Panel</a>
     </div>
     <script>
+        // --- Public Files Sorting Logic ---
+        (function() {
+            const table = document.getElementById('public-files-table');
+            if (!table) return;
+            const tbody = table.querySelector('tbody');
+            const headers = table.querySelectorAll('th.sortable');
+
+            let currentSort = localStorage.getItem('publicSortType') || 'name';
+            let sortDirection = localStorage.getItem('publicSortDirection') || 'asc';
+
+            function updateIndicators() {
+                headers.forEach(h => {
+                    const ind = h.querySelector('.sort-indicator');
+                    if (h.dataset.sort === currentSort) {
+                        ind.textContent = sortDirection === 'asc' ? ' ▲' : ' ▼';
+                    } else {
+                        ind.textContent = '';
+                    }
+                });
+            }
+
+            function sortTable() {
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                const parentRow = rows.find(r => r.classList.contains('parent-row'));
+                const sortableRows = rows.filter(r => !r.classList.contains('parent-row'));
+
+                sortableRows.sort((a, b) => {
+                    const aDir = a.classList.contains('dir-row');
+                    const bDir = b.classList.contains('dir-row');
+                    if (aDir && !bDir) return -1;
+                    if (!aDir && bDir) return 1;
+
+                    let valA, valB;
+                    if (currentSort === 'name') {
+                        valA = a.dataset.name || '';
+                        valB = b.dataset.name || '';
+                        return sortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                    } else if (currentSort === 'size') {
+                        valA = parseFloat(a.dataset.size) || -1;
+                        valB = parseFloat(b.dataset.size) || -1;
+                    } else {
+                        valA = parseFloat(a.dataset[currentSort]) || 0;
+                        valB = parseFloat(b.dataset[currentSort]) || 0;
+                    }
+                    return sortDirection === 'asc' ? valA - valB : valB - valA;
+                });
+
+                tbody.innerHTML = '';
+                if (parentRow) tbody.appendChild(parentRow);
+                sortableRows.forEach(row => tbody.appendChild(row));
+
+                localStorage.setItem('publicSortType', currentSort);
+                localStorage.setItem('publicSortDirection', sortDirection);
+            }
+
+            headers.forEach(header => {
+                header.addEventListener('click', () => {
+                    const key = header.dataset.sort;
+                    if (currentSort === key) {
+                        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentSort = key;
+                        sortDirection = 'asc';
+                    }
+                    updateIndicators();
+                    sortTable();
+                });
+            });
+
+            updateIndicators();
+            sortTable();
+        })();
+
         document.getElementById('theme-toggle').addEventListener('click', () => {
             const html = document.documentElement;
             html.classList.toggle('dark-mode');
@@ -1377,23 +1458,33 @@ def list_public_files(server_name, subpath):
     try:
         for item_name in sorted(os.listdir(requested_path), key=str.lower):
             full_path = os.path.join(requested_path, item_name)
-            # Create a relative path from the *base* public dir for URL generation
             relative_path = os.path.relpath(full_path, base_public_dir).replace("\\", "/")
 
             stat_info = os.stat(full_path)
             modified_time = datetime.fromtimestamp(stat_info.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            created_raw = getattr(stat_info, 'st_birthtime', stat_info.st_ctime)
+            created_time = datetime.fromtimestamp(created_raw).strftime("%Y-%m-%d %H:%M:%S")
 
             if os.path.isdir(full_path):
-                directories.append({"name": item_name, "path": relative_path})
+                directories.append({
+                    "name": item_name,
+                    "path": relative_path,
+                    "modified": modified_time,
+                    "modified_ts": stat_info.st_mtime,
+                    "created": created_time,
+                    "created_ts": created_raw,
+                })
             else:
-                files.append(
-                    {
-                        "name": item_name,
-                        "path": relative_path,
-                        "size_human": get_human_readable_size(stat_info.st_size),
-                        "modified": modified_time,
-                    }
-                )
+                files.append({
+                    "name": item_name,
+                    "path": relative_path,
+                    "size_human": get_human_readable_size(stat_info.st_size),
+                    "size_bytes": stat_info.st_size,
+                    "modified": modified_time,
+                    "modified_ts": stat_info.st_mtime,
+                    "created": created_time,
+                    "created_ts": created_raw,
+                })
     except OSError as e:
         flash(f"Error reading directory: {e}", "danger")
 
