@@ -453,28 +453,26 @@ def read_process_output(server_name, process):
         # Safely update status if the process entry still exists
         if server_name in running_processes:
             with running_processes[server_name]["lock"]:
-                if running_processes[server_name].get("process") is None:
-                    return
+                if not running_processes[server_name].get("process") is None:
+                    if not running_processes[server_name]["stop_requested"]:
+                        running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED UNEXPECTEDLY ---")
+                    else:
+                        running_processes[server_name]["output"].append("STY:marker:--- SCRIPT STOPPED ---")
 
-                if not running_processes[server_name]["stop_requested"]:
-                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT FINISHED UNEXPECTEDLY ---")
-                else:
-                    running_processes[server_name]["output"].append("STY:marker:--- SCRIPT STOPPED ---")
+                    print(f"Process for {server_name} has exited. Running cleanup from output thread...")
 
-                print(f"Process for {server_name} has exited. Running cleanup from output thread...")
+                    # 1. Cleanup Port Mapping
+                    cleanup_server_port_mapping(server_name)
 
-                # 1. Cleanup Port Mapping
-                cleanup_server_port_mapping(server_name)
+                    # 2. Backup Copy
+                    server_path = os.path.join(SERVERS_BASE_DIR, server_name)
+                    try:
+                        copy_latest_backup(server_name, server_path)
+                    except Exception as backup_e:
+                        print(f"Critical error calling backup function for {server_name}: {backup_e}")
 
-                # 2. Backup Copy
-                server_path = os.path.join(SERVERS_BASE_DIR, server_name)
-                try:
-                    copy_latest_backup(server_name, server_path)
-                except Exception as backup_e:
-                    print(f"Critical error calling backup function for {server_name}: {backup_e}")
-
-                print(f"Cleanup for {server_name} complete.")
-                running_processes[server_name]["process"] = None
+                    print(f"Cleanup for {server_name} complete.")
+                    running_processes[server_name]["process"] = None
 
 
 # --- Backup Helper ---
@@ -2545,7 +2543,7 @@ HTML_TEMPLATE = """
                     // Re-enable button only if server is still running
                     const statusSpan = document.getElementById(`status-${serverName}`)?.textContent?.trim();
                     console.debug(`Status for ${serverName}: ${statusSpan}`);
-                    if (statusSpan && (statusSpan  === 'Running' || statusSpan === 'Starting...' || statusSpan === 'Started')) {
+                    if (statusSpan && (statusSpan  === 'Running' || statusSpan.includes('Starting') || statusSpan === 'Started')) {
                         commandButton.disabled = false;
                     }
                 });
@@ -2834,9 +2832,15 @@ HTML_TEMPLATE = """
                     case 'starting':
                         startButton.disabled = true;
                         stopButton.disabled = false;
-                        // if (forceStopButton) forceStopButton.style.display = 'none';
+                        if (forceStopButton) forceStopButton.style.display = 'none';
                         outputArea.style.display = 'block';
-                        // if(commandSection) commandSection.style.display = 'none';
+                        if(commandSection) commandSection.style.display = 'flex';
+                        if(commandSection) commandSection.style.display = 'flex';
+                        if(commandButton) commandButton.disabled = false;
+                        if(commandInput) commandInput.disabled = false;
+                        if(commandPasswordInput) commandPasswordInput.disabled = false;
+                        if(resourceMonitor) resourceMonitor.style.display = 'block';
+                        if(portDisplay) portDisplay.style.display = 'block';
                         break;
                     case 'running':  // "Started"
                         startButton.disabled = true;
