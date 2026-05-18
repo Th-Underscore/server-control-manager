@@ -187,7 +187,7 @@ def setup_upnp_port_forwarding(server_name, port_range):
             internal_ip = u.lanaddr
             logs.append(f"STY:log:UPnP device found.")
 
-            # --- Build a complete list of currently mapped ports ---
+            # --- Build a complete list of currently mapped ports (TCP + UDP) ---
             mapped_ports = set()
             i = 0
             while True:
@@ -195,12 +195,11 @@ def setup_upnp_port_forwarding(server_name, port_range):
                 if mapping is None:
                     break
                 ext_port, proto, _, _, _, _, _ = mapping
-                if proto == "TCP":
-                    mapped_ports.add(ext_port)
+                mapped_ports.add(ext_port)
                 i += 1
 
             if mapped_ports:
-                logs.append(f"STY:log:Router reports these TCP ports are mapped: {sorted(list(mapped_ports))}")
+                logs.append(f"STY:log:Router reports these ports are already mapped: {sorted(list(mapped_ports))}")
             # ----------------------------------------------------
 
             for port in port_range:
@@ -216,17 +215,22 @@ def setup_upnp_port_forwarding(server_name, port_range):
                     logs.append(f"STY:log:Port {port} is reserved by another starting SCM server. Skipping.")
                     continue
 
-                logs.append(f"STY:log:Port {port} appears free. Attempting to forward...")
+                logs.append(f"STY:log:Port {port} appears free. Attempting to forward TCP and UDP...")
                 try:
                     reserved_ports.add(port)
                     description = f"SCM - {server_name}"
                     u.addportmapping(port, "TCP", internal_ip, port, description, "")
-                    logs.append(f"STY:log:Successfully forwarded port {port} -> {internal_ip}:{port}")
+                    logs.append(f"STY:log:Successfully forwarded TCP port {port} -> {internal_ip}:{port}")
+                    try:
+                        u.addportmapping(port, "UDP", internal_ip, port, description, "")
+                        logs.append(f"STY:log:Successfully forwarded UDP port {port} -> {internal_ip}:{port}")
+                    except Exception as e:
+                        logs.append(f"STY:error:Failed to map UDP port {port}: {e}. TCP mapping left in place.")
                     upnp_mappings[server_name] = port
                     return port, logs
                 except Exception as e:
                     # Should only happen in a true race condition
-                    logs.append(f"STY:error:Failed to map port {port}: {e}")
+                    logs.append(f"STY:error:Failed to map TCP port {port}: {e}")
                     reserved_ports.discard(port)
 
             return None, logs + [f"STY:error:No available ports found in the range {port_range.start}-{port_range.stop-1}."]
@@ -249,10 +253,18 @@ def remove_upnp_port_forwarding(port):
             u.discoverdelay = 200
             if u.discover() > 0:
                 u.selectigd()
-                if u.deleteportmapping(port, "TCP"):
-                    logs.append(f"STY:log:Successfully removed UPnP port mapping for port {port}.")
+                removed_tcp = u.deleteportmapping(port, "TCP")
+                if removed_tcp:
+                    logs.append(f"STY:log:Successfully removed TCP port mapping for port {port}.")
                 else:
-                    logs.append(f"STY:error:Failed to remove UPnP port mapping for port {port}. It may not exist.")
+                    logs.append(f"STY:log:No TCP mapping found for port {port}.")
+                removed_udp = u.deleteportmapping(port, "UDP")
+                if removed_udp:
+                    logs.append(f"STY:log:Successfully removed UDP port mapping for port {port}.")
+                else:
+                    logs.append(f"STY:log:No UDP mapping found for port {port}.")
+                if not removed_tcp and not removed_udp:
+                    logs.append(f"STY:error:Failed to find any UPnP port mapping for port {port}.")
             else:
                 logs.append("STY:error:Could not find UPnP device to remove port mapping.")
         except Exception as e:
